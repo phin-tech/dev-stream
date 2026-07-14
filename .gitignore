@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# SvelteKit / Vite build output
+.svelte-kit/
+.deno-deploy/
+.output/
+build/
+dist/
+
+# Deno
+.deno/
+
+# deno desktop compiled app bundles
+*.app
+/out/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
