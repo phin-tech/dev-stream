@@ -1,7 +1,7 @@
 /**
  * The ingestion API: the one surface everything writes through.
  *
- * The CLI, Claude hooks, the MCP server, the built-in pollers and the UI are all
+ * The CLI, Claude hooks, the MCP server, source plugins and the UI are all
  * just HTTP clients of this. That is the point -- it's what lets anything post to
  * the timeline without a plugin, and it means there is exactly one place where
  * posts get validated, deduped and broadcast.

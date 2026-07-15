@@ -74,9 +74,7 @@ export async function startBackend(opts: StartOptions = {}): Promise<Backend> {
 		console.log(`[plugins] found ${plugins.map((p) => p.manifest.slug).join(', ')}`);
 	}
 
-	// Built-in integrations (GitHub, Linear) plus any trusted plugins. Privileged
-	// only in that they skip the HTTP hop -- their posts still go through
-	// insertPosts like everyone else's.
+	// Installed integrations all enter through the permission-scoped plugin path.
 	const sources = startSourceRunner(db, broadcaster);
 	const pluginSource = new GitHubContentsSource();
 

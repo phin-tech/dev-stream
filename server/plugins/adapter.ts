@@ -1,9 +1,8 @@
 /**
  * Wraps an installed plugin as a `SourceWorker`, so the registry, runner,
- * store and settings page treat it exactly like GitHub or Linear.
+ * store and settings page treat every installed source consistently.
  *
- * The difference is *where the code runs*: a built-in polls in-process, a
- * plugin polls inside a one-shot worker whose permissions are exactly its
+ * Plugin code polls inside a one-shot worker whose permissions are exactly its
  * manifest's. The isolate cannot touch the database, the filesystem (beyond
  * its own directory), or any host it didn't declare — so the worst a plugin
  * holding the user's token can do is talk to the API that token belongs to.

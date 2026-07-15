@@ -1,11 +1,13 @@
 # Source plugins
 
-A source plugin is a directory of TypeScript that dev-stream polls for posts,
-exactly like the built-in GitHub and Linear integrations — except its code runs
-inside a sandboxed worker that can only touch what its manifest declares, and
-only after you have explicitly trusted it in Settings.
+A source plugin is a directory of TypeScript that dev-stream polls for posts.
+Its code runs inside a sandboxed worker that can only touch what its manifest
+declares, and only after you have explicitly trusted it in Settings.
 
 ## Installing one
+
+Paste a GitHub repository or tree URL into Settings → Integrations, or install a
+local development copy manually:
 
 ```sh
 mkdir -p ~/.dev-stream/plugins

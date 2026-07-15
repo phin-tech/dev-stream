@@ -20,7 +20,7 @@ timeline.
   MCP clients ── stdio ── MCP   │        ▼                         │
   (claude, etc.)  server ──HTTP─┤  SvelteKit UI in webview         │
                                 │  (timeline, filters, views)      │
-  GitHub / Linear ── pollers ───┤  built-in source workers         │
+  source plugins ── sandboxed ──┤  permission-scoped workers      │
                                 └──────────────────────────────────┘
 ```
 
@@ -206,15 +206,18 @@ Gives any MCP client four tools: `post_to_timeline`, `search_timeline`,
 
 ## Integrations
 
-Settings → Integrations. Both poll; neither needs a public URL.
+Settings → Integrations → Install plugin from GitHub. Official plugins:
+
+- `https://github.com/phin-tech/dev-stream-plugins/tree/main/github`
+- `https://github.com/phin-tech/dev-stream-plugins/tree/main/linear`
 
 - **GitHub** — a PAT with `notifications` + `repo`. Polls your notifications:
   PRs, reviews requested, issues, failing check suites. Optionally scoped to repos.
 - **Linear** — a personal API key. Polls issues by `updatedAt`, optionally by team.
 
-They're just privileged clients of the same ingestion path, so their posts are
-filterable, searchable and mutable exactly like everything else. A first poll looks
-back 24h — enabling an integration shouldn't dump a year of backlog into your feed.
+They run in permission-scoped workers and cannot poll until you trust the manifest.
+Their posts use the same ingestion path, so they are filterable and searchable like
+everything else. A first poll looks back 24h rather than importing an entire backlog.
 
 > Credentials are stored in plaintext in the local SQLite DB. Single-user,
 > machine-local — but worth knowing before pasting a broadly-scoped token.
