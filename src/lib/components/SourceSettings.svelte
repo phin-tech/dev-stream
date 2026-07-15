@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { pollSource, saveSource } from '../api';
+	import { pollSource, saveSource, trustSource } from '../api';
 	import { relativeTime } from '../format';
 	import type { SourceStatus } from '../../shared/types';
 
@@ -10,6 +10,35 @@
 	}
 
 	let { source, onChange }: Props = $props();
+
+	/**
+	 * The manifest's permission list, flattened for display. This is the whole
+	 * point of the trust step: the user reads THIS, then decides.
+	 */
+	const permissionRows = $derived.by(() => {
+		const p = source.permissions;
+		if (!p) return [];
+		const rows: { label: string; value: string; warn?: string }[] = [];
+		if (p.net?.length) rows.push({ label: 'Network', value: p.net.join(', ') });
+		if (p.net_from_config?.length) {
+			rows.push({
+				label: 'Network (from config)',
+				value: p.net_from_config.map((k) => `the host in “${k}”`).join(', ')
+			});
+		}
+		if (p.read?.length) rows.push({ label: 'Read files', value: p.read.join(', ') });
+		if (p.write?.length) rows.push({ label: 'Write files', value: p.write.join(', ') });
+		if (p.run?.length) {
+			rows.push({
+				label: 'Run commands',
+				value: p.run.join(', '),
+				warn: 'commands run OUTSIDE the sandbox, with the app’s full access'
+			});
+		}
+		if (p.env?.length) rows.push({ label: 'Environment variables', value: p.env.join(', ') });
+		if (rows.length === 0) rows.push({ label: 'No access requested', value: 'runs fully sandboxed' });
+		return rows;
+	});
 
 	// Secrets start blank because the server never sends them back. Submitting a
 	// blank secret preserves the stored one (the server enforces that), so the
@@ -28,6 +57,7 @@
 	async function save(enabled: boolean) {
 		busy = true;
 		message = null;
+		const wasEnabled = source.enabled;
 		try {
 			const updated = await saveSource(source.slug, { enabled, config: values });
 			onChange(updated);
@@ -36,7 +66,11 @@
 			for (const field of source.fields) {
 				if (field.secret) values[field.key] = '';
 			}
-			message = enabled ? 'Saved. Polling now…' : 'Disabled. Credentials kept.';
+			message = enabled
+				? 'Saved. Polling now…'
+				: wasEnabled
+					? 'Disabled. Credentials kept.'
+					: 'Saved.';
 		} catch (err) {
 			message = String(err);
 		} finally {
@@ -56,11 +90,30 @@
 			busy = false;
 		}
 	}
+
+	async function setTrust(trusted: boolean) {
+		busy = true;
+		message = null;
+		try {
+			const updated = await trustSource(source.slug, trusted);
+			onChange(updated);
+			message = trusted
+				? 'Trusted. It can be enabled now.'
+				: 'Trust revoked. The plugin is disabled and will not run.';
+		} catch (err) {
+			message = String(err);
+		} finally {
+			busy = false;
+		}
+	}
 </script>
 
 <div class="source" class:enabled={source.enabled}>
 	<div class="head">
 		<strong>{source.label}</strong>
+		{#if source.origin === 'plugin'}
+			<span class="badge plugin">plugin</span>
+		{/if}
 		{#if source.enabled}
 			<span class="badge on">on</span>
 		{:else}
@@ -73,6 +126,9 @@
 
 		<span class="spacer"></span>
 
+		{#if source.origin === 'plugin' && source.trusted}
+			<button disabled={busy} onclick={() => setTrust(false)}>Revoke trust</button>
+		{/if}
 		{#if source.enabled}
 			<button disabled={busy} onclick={pollNow}>Poll now</button>
 			<button disabled={busy} onclick={() => save(false)}>Disable</button>
@@ -83,6 +139,38 @@
 		<!-- The single most likely way this feature fails is quietly: a token that
 		     expired weeks ago and a feed that just went silent. Say it loudly. -->
 		<p class="error">{source.last_error}</p>
+	{/if}
+
+	{#if source.origin === 'plugin'}
+		<!-- The permission list is shown ALWAYS, not just at the trust prompt:
+		     what a plugin can reach should stay one glance away. -->
+		<div class="permissions" class:untrusted={!source.trusted}>
+			<div class="permissions-head">
+				{#if source.trusted}
+					<span class="label">This plugin can access</span>
+				{:else}
+					<span class="label">This plugin asks for</span>
+				{/if}
+			</div>
+			<ul>
+				{#each permissionRows as row (row.label)}
+					<li>
+						<span class="perm-label">{row.label}:</span>
+						<span class="perm-value">{row.value}</span>
+						{#if row.warn}<span class="perm-warn">⚠ {row.warn}</span>{/if}
+					</li>
+				{/each}
+			</ul>
+			{#if !source.trusted}
+				<p class="trust-note">
+					Untrusted plugins never run. Trust it only if you know where its code came from —
+					a manifest change asking for more access will require trusting it again.
+				</p>
+				<button class="primary" disabled={busy} onclick={() => setTrust(true)}>
+					Trust this plugin
+				</button>
+			{/if}
+		</div>
 	{/if}
 
 	<div class="fields">
@@ -105,9 +193,16 @@
 	</div>
 
 	<div class="actions">
-		<button class="primary" disabled={busy} onclick={() => save(true)}>
-			{source.enabled ? 'Save' : 'Enable'}
-		</button>
+		<!-- Saving config while untrusted is fine (typing a token runs nothing);
+		     enabling is what the server refuses, so don't offer it. -->
+		{#if source.origin === 'plugin' && !source.trusted}
+			<button class="primary" disabled={busy} onclick={() => save(false)}>Save</button>
+			<span class="dim">trust the plugin above to enable it</span>
+		{:else}
+			<button class="primary" disabled={busy} onclick={() => save(true)}>
+				{source.enabled ? 'Save' : 'Enable'}
+			</button>
+		{/if}
 		{#if message}<span class="message">{message}</span>{/if}
 	</div>
 </div>
@@ -115,10 +210,10 @@
 <style>
 	.source {
 		border: 1px solid var(--rail);
-		border-radius: 9px;
-		padding: 0.8rem 0.9rem;
-		margin-bottom: 0.75rem;
-		background: var(--surface);
+		border-radius: var(--radius-md);
+		padding: var(--space-lg);
+		margin-bottom: var(--space-md);
+		background: var(--surface-raised);
 	}
 	.source.enabled {
 		border-color: color-mix(in srgb, var(--live) 40%, var(--rail));
@@ -131,20 +226,18 @@
 		margin-bottom: 0.6rem;
 	}
 	.head strong {
-		font-size: 0.9rem;
-		font-weight: 600;
+		font-size: 0.95rem;
+		font-weight: 750;
 	}
 	.spacer {
 		flex: 1;
 	}
 
 	.badge {
-		font-family: var(--mono);
-		font-size: 0.62rem;
-		text-transform: uppercase;
-		letter-spacing: 0.08em;
-		padding: 0.06rem 0.4rem;
-		border-radius: 5px;
+		font-size: 0.75rem;
+		font-weight: 700;
+		padding: var(--space-xs) var(--space-sm);
+		border-radius: var(--radius-sm);
 		border: 1px solid var(--rail);
 		color: var(--fg-dim);
 	}
@@ -153,11 +246,59 @@
 		color: var(--live-soft);
 		background: color-mix(in srgb, var(--live) 10%, transparent);
 	}
+	.badge.plugin {
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+	}
+
+	/* --- the trust surface ------------------------------------------------- */
+	.permissions {
+		border: 1px solid var(--rail);
+		border-radius: var(--radius-sm);
+		background: var(--inset);
+		padding: var(--space-md);
+		margin-bottom: var(--space-md);
+	}
+	/* Untrusted is the state that wants your eyes: it is a pending decision. */
+	.permissions.untrusted {
+		border-color: color-mix(in srgb, var(--alert) 40%, var(--rail));
+	}
+	.permissions-head {
+		margin-bottom: var(--space-xs);
+	}
+	.permissions ul {
+		margin: 0;
+		padding: 0;
+		list-style: none;
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-xs);
+	}
+	.perm-label {
+		font-size: 0.8rem;
+		font-weight: 650;
+		color: var(--fg-soft);
+	}
+	.perm-value {
+		font-size: 0.8rem;
+		font-family: var(--mono, ui-monospace, monospace);
+		color: var(--fg);
+	}
+	.perm-warn {
+		display: block;
+		font-size: 0.78rem;
+		color: var(--alert);
+	}
+	.trust-note {
+		font-size: 0.78rem;
+		color: var(--fg-soft);
+		margin: var(--space-sm) 0;
+	}
 
 	.fields {
 		display: flex;
 		flex-direction: column;
-		gap: 0.55rem;
+		gap: var(--space-md);
 	}
 	label {
 		display: flex;
@@ -165,23 +306,23 @@
 		gap: 0.25rem;
 	}
 	.label {
-		font-size: 0.78rem;
+		font-size: 0.82rem;
+		font-weight: 650;
 		color: var(--fg-soft);
 	}
 	.help {
-		font-family: var(--mono);
-		font-size: 0.7rem;
-		color: var(--fg-dim);
+		font-size: 0.78rem;
+		color: var(--fg-soft);
 	}
 
 	input {
-		padding: 0.34rem 0.5rem;
-		border-radius: 7px;
+		min-height: 2.75rem;
+		padding: var(--space-sm) var(--space-md);
+		border-radius: var(--radius-sm);
 		border: 1px solid var(--rail);
 		background: var(--inset);
 		color: var(--fg);
-		font-family: var(--mono);
-		font-size: 0.8rem;
+		font-size: 0.86rem;
 	}
 	input:focus {
 		outline: none;
@@ -196,10 +337,11 @@
 	}
 
 	button {
-		font-family: var(--mono);
-		font-size: 0.75rem;
-		padding: 0.28rem 0.6rem;
-		border-radius: 7px;
+		font-size: 0.78rem;
+		font-weight: 700;
+		min-height: 2.5rem;
+		padding: var(--space-sm) var(--space-md);
+		border-radius: var(--radius-sm);
 		border: 1px solid var(--rail);
 		background: var(--inset);
 		color: var(--fg-soft);
@@ -219,9 +361,8 @@
 	}
 
 	.message {
-		font-family: var(--mono);
-		font-size: 0.72rem;
-		color: var(--fg-dim);
+		font-size: 0.78rem;
+		color: var(--fg-soft);
 	}
 	.error {
 		color: var(--alert);
@@ -229,8 +370,7 @@
 		margin: 0 0 0.6rem;
 	}
 	.dim {
-		font-family: var(--mono);
-		color: var(--fg-dim);
-		font-size: 0.72rem;
+		color: var(--fg-soft);
+		font-size: 0.78rem;
 	}
 </style>

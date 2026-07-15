@@ -8,7 +8,7 @@
  * corrupt the timeline.
  */
 
-import type { PostInput } from '../../src/shared/types.ts';
+import type { PluginPermissions, PostInput } from '../../src/shared/types.ts';
 
 /** One credential or option the settings UI should collect for a worker. */
 export interface ConfigField {
@@ -44,6 +44,16 @@ export interface SourceWorker {
 	defaultIntervalMs: number;
 	configFields: ConfigField[];
 	/**
+	 * Set for workers backed by an installed plugin; absent for built-ins.
+	 * A plugin worker polls inside a permission-scoped worker, and only while
+	 * the user's trust grant (bound to `manifestHash`) is current.
+	 */
+	origin?: 'plugin';
+	/** What the plugin's manifest asks for. Shown to the user at trust time. */
+	permissions?: PluginPermissions;
+	/** sha256 of the plugin's manifest.json. Trust binds to this exact value. */
+	manifestHash?: string;
+	/**
 	 * Fetch what's new since `cursor`.
 	 *
 	 * Throwing is fine and expected — a bad token, a rate limit, an outage. The
@@ -58,6 +68,11 @@ export interface SourceWorker {
 export interface SourceStatus {
 	slug: string;
 	label: string;
+	origin: 'builtin' | 'plugin';
+	/** Built-ins always; plugins only while the user's grant matches the manifest. */
+	trusted: boolean;
+	/** The plugin's requested access. Absent for built-ins. */
+	permissions?: PluginPermissions;
 	enabled: boolean;
 	/** True when every required secret has a stored value. */
 	configured: boolean;

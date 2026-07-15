@@ -47,6 +47,8 @@ export const tokenPath = () => join(home(), 'token');
 export const portPath = () => join(home(), 'port');
 /** JSON-lines dropped by clients while the app was down; drained on startup. */
 export const spoolDir = () => join(home(), 'spool');
+/** One subdirectory per installed source plugin: `plugins/<name>/manifest.json`. */
+export const pluginsDir = () => join(home(), 'plugins');
 
 /** Creates the home + spool dirs if absent. Safe to call repeatedly. */
 export async function ensureHome(): Promise<void> {

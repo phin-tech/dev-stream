@@ -1,0 +1,23 @@
+{
+	"slug": "hackernews",
+	"label": "Hacker News",
+	"entry": "mod.ts",
+	"defaultIntervalMs": 300000,
+	"configFields": [
+		{
+			"key": "query",
+			"label": "Search query (optional)",
+			"placeholder": "deno, sqlite, …",
+			"help": "Only stories matching this query. Leave empty for the whole new-stories firehose (busy!)."
+		},
+		{
+			"key": "min_points",
+			"label": "Minimum points (optional)",
+			"placeholder": "10",
+			"help": "Skip stories below this score. Empty means no floor."
+		}
+	],
+	"permissions": {
+		"net": ["hn.algolia.com"]
+	}
+}

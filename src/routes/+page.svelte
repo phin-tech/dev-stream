@@ -1,26 +1,42 @@
 <script lang="ts">
-	import { onMount, tick } from 'svelte';
+	import { onMount } from 'svelte';
 	import FilterBar from '$lib/components/FilterBar.svelte';
 	import PostCard from '$lib/components/PostCard.svelte';
 	import ViewSidebar from '$lib/components/ViewSidebar.svelte';
 	import { Feed } from '$lib/feed.svelte';
 	import { createView, deleteView, updateView } from '$lib/api';
+	import { dispatchKey, NAV_COMMANDS, viewCommands, type CommandContext } from '$lib/commands';
 	import { dayKey, dayLabel } from '$lib/format';
+	import { activityArrivalMode } from '$lib/timeline';
 	import type { PostFilter, ViewWithUnread } from '../shared/types';
 
 	const feed = new Feed();
 
 	let scroller = $state<HTMLElement | null>(null);
 	let sentinel = $state<HTMLElement | null>(null);
+	let atTop = $state(true);
+	const arrivalMode = $derived(activityArrivalMode({ pendingCount: feed.pending.length, atTop }));
 
 	const mutedCount = $derived(
 		feed.muted.muted_sources.length + feed.muted.muted_tags.length
 	);
 
+	// Loaded unread posts. A lower bound -- there may be more below the fold -- so
+	// the count is shown with a "+" whenever the timeline has another page.
+	const unseenCount = $derived(feed.posts.filter((p) => !p.seen).length);
+
 	onMount(() => {
 		void feed.start();
 		return () => feed.stop();
 	});
+
+	$effect(() => {
+		if (arrivalMode === 'inline') feed.applyPending();
+	});
+
+	function trackScroll() {
+		atTop = (scroller?.scrollTop ?? 0) < 24;
+	}
 
 	// Infinite scroll: when the sentinel below the last card comes into view, pull
 	// the next page. An IntersectionObserver rather than a scroll handler — it
@@ -39,6 +55,34 @@
 		return () => observer.disconnect();
 	});
 
+	// Opt-in (Settings → Reading): mark a post seen once it has scrolled fully above
+	// the top of the viewport. Re-created whenever the post list changes, so cards
+	// pulled in by pagination or a live arrival get observed too. Reading
+	// `feed.posts.length` is what makes the effect re-run on those changes; mutating
+	// a post's own `seen` flag doesn't change the length, so marking doesn't churn it.
+	$effect(() => {
+		if (!scroller || !feed.markSeenOnScroll) return;
+		void feed.posts.length;
+
+		const observer = new IntersectionObserver(
+			(entries) => {
+				for (const entry of entries) {
+					const scrolledAbove =
+						!entry.isIntersecting &&
+						entry.rootBounds !== null &&
+						entry.boundingClientRect.bottom <= entry.rootBounds.top;
+					if (!scrolledAbove) continue;
+					const id = (entry.target as HTMLElement).dataset.postId;
+					if (id) void feed.markSeen(id);
+				}
+			},
+			{ root: scroller }
+		);
+
+		for (const el of scroller.querySelectorAll('article[data-post-id]')) observer.observe(el);
+		return () => observer.disconnect();
+	});
+
 	function showNew() {
 		feed.applyPending();
 		scroller?.scrollTo({ top: 0, behavior: 'smooth' });
@@ -51,34 +95,35 @@
 		scroller?.scrollTo({ top: 0 });
 	}
 
-	// --- keyboard nav --------------------------------------------------------
-
-	async function onKeydown(event: KeyboardEvent) {
-		// Never steal a keystroke from a text field: `j` belongs to whoever is
-		// typing in the search box.
-		const target = event.target as HTMLElement | null;
-		if (target?.matches('input, textarea, select') || event.metaKey || event.ctrlKey) return;
-
-		if (event.key === 'j' || event.key === 'k') {
-			event.preventDefault();
-			const index = feed.moveSelection(event.key === 'j' ? 1 : -1);
-			if (index < 0) return;
-
-			// The card may not exist yet if selection pulled in a new page.
-			await tick();
-			scroller
-				?.querySelectorAll('article')
-				[index]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-		}
-
-		if (event.key === 'g') {
-			feed.selected = -1;
-			scroller?.scrollTo({ top: 0, behavior: 'smooth' });
-		}
-
-		// `.` is the conventional "show me what arrived" key in a live feed.
-		if (event.key === '.' && feed.pending.length > 0) showNew();
+	function toggleSelectedDetails() {
+		if (!scroller || feed.selected < 0) return;
+		const card = scroller.querySelectorAll<HTMLElement>('article[data-post-id]')[feed.selected];
+		card?.querySelector<HTMLButtonElement>('[data-disclosure-toggle]')?.click();
 	}
+
+	// --- commands ------------------------------------------------------------
+
+	// What every command acts through. `scroller` is a getter so commands always
+	// see the live element, not whatever it was when this object was built.
+	const ctx: CommandContext = {
+		feed,
+		get scroller() {
+			return scroller;
+		},
+		scrollToTop: (smooth = false) => {
+			if (!scroller) return;
+			scroller.scrollTop = 0;
+			if (smooth) scroller.scrollTo({ top: 0, behavior: 'smooth' });
+		},
+		openTimeline: () => openTimeline(),
+		openView: (view) => openView(view),
+		showNew: () => showNew(),
+		toggleSelectedDetails
+	};
+
+	// Static timeline commands plus one per saved view (Cmd/Ctrl 1–9, 0), rebuilt
+	// as the sidebar changes so the shortcuts always track the first ten views.
+	const commands = $derived([...NAV_COMMANDS, ...viewCommands(feed.views)]);
 
 	// --- views ---------------------------------------------------------------
 
@@ -121,7 +166,7 @@
 	}
 </script>
 
-<svelte:window onkeydown={onKeydown} />
+<svelte:window onkeydown={(e) => dispatchKey(commands, e, ctx)} />
 
 <div class="layout">
 	<ViewSidebar
@@ -155,11 +200,19 @@
 			</div>
 		{/if}
 
-		<main bind:this={scroller}>
-			{#if feed.pending.length > 0}
+		{#if unseenCount > 0}
+			<div class="read-bar">
+				<span class="count">{unseenCount}{feed.hasMore ? '+' : ''}</span>
+				unread
+				<button onclick={() => feed.markAllSeen()}>Mark all as read</button>
+			</div>
+		{/if}
+
+		<main bind:this={scroller} onscroll={trackScroll}>
+			{#if arrivalMode === 'indicator'}
 				<button class="pill" onclick={showNew}>
 					{feed.pending.length}
-					new {feed.pending.length === 1 ? 'post' : 'posts'}
+					{feed.pending.length === 1 ? 'newer item' : 'newer items'} ↑
 				</button>
 			{/if}
 
@@ -197,6 +250,7 @@
 						fresh={feed.arrivedIds.includes(post.id)}
 						onFilter={addFilter}
 						onMute={(dimension, value) => feed.mute(dimension, value)}
+						onSeenChange={(seen) => (seen ? feed.markSeen(post.id) : feed.markUnseen(post.id))}
 					/>
 				{/each}
 
@@ -233,42 +287,31 @@
 		padding: 0 1rem 2rem;
 	}
 
-	/* The time-rail: one continuous hairline spine the whole feed hangs from. It
-	   runs through the centre of every post's node (gutter width + half a node). */
 	.stream {
-		position: relative;
-	}
-	.stream::before {
-		content: '';
-		position: absolute;
-		top: 6px;
-		bottom: 0;
-		left: calc(var(--gutter) + (var(--node) / 2) - 0.5px);
-		width: 1px;
-		background: var(--rail);
+		width: min(100%, 64rem);
+		margin: 0 auto;
+		padding: var(--space-sm) var(--space-lg) var(--space-xl);
+		box-sizing: border-box;
 	}
 
 	/* A day heading that punctuates the rail; shares the post grid so its label
 	   lands in the timestamp gutter. */
 	.daymark {
-		display: grid;
-		grid-template-columns: var(--gutter) 1fr;
-		column-gap: 18px;
+		display: flex;
+		gap: var(--space-md);
 		align-items: center;
-		padding: 0.95rem 0 0.35rem;
+		padding: var(--space-sm) 0 var(--space-xs);
 	}
 	.daymark .lbl {
-		font-family: var(--mono);
-		font-size: 0.64rem;
-		letter-spacing: 0.1em;
-		text-transform: uppercase;
-		color: var(--fg-dim);
-		text-align: right;
-		padding-right: 8px;
+		font-size: 0.78rem;
+		font-weight: 700;
+		color: var(--fg-soft);
+		white-space: nowrap;
 	}
 	.daymark .rule {
+		flex: 1;
 		height: 1px;
-		background: linear-gradient(90deg, var(--rail), transparent);
+		background: var(--rail-soft);
 	}
 
 	/* Floats over the feed rather than pushing it down: announcing new posts must
@@ -276,7 +319,7 @@
 	.pill {
 		position: sticky;
 		top: 0.7rem;
-		z-index: 5;
+		z-index: var(--z-sticky);
 		display: flex;
 		align-items: center;
 		gap: 0.4rem;
@@ -284,21 +327,19 @@
 		margin: 0.7rem auto 0;
 		padding: 0.3rem 0.8rem 0.3rem 0.6rem;
 		border-radius: 999px;
-		border: 1px solid var(--live);
-		background: var(--surface);
-		color: var(--live);
-		font-family: var(--mono);
-		font-size: 0.74rem;
-		font-weight: 600;
-		box-shadow: 0 6px 20px rgb(0 0 0 / 0.5);
+		border: none;
+		background: var(--live);
+		color: var(--ink);
+		font-size: 0.8rem;
+		font-weight: 750;
+		box-shadow: 0 4px 8px oklch(0.06 0.03 255 / 0.45);
 	}
 	.pill::before {
 		content: '';
 		width: 6px;
 		height: 6px;
 		border-radius: 50%;
-		background: var(--live);
-		animation: pill-pulse 2.4s ease-out infinite;
+		background: var(--ink);
 	}
 	@keyframes pill-pulse {
 		0% {
@@ -337,10 +378,37 @@
 		padding: 0;
 	}
 
-	.notice {
+	/* Same quiet register as the muted bar: a status line with one action, not a
+	   toolbar. The count nods to the unread nodes lit down the rail. */
+	.read-bar {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.4rem 1rem;
+		font-family: var(--mono);
+		font-size: 0.72rem;
 		color: var(--fg-dim);
-		font-size: 0.85rem;
-		padding: 1rem;
+		background: var(--inset);
+		border-bottom: 1px solid var(--rail);
+	}
+	.read-bar .count {
+		color: var(--live-soft);
+		font-weight: 600;
+	}
+	.read-bar button {
+		margin-left: auto;
+		border: none;
+		background: transparent;
+		color: var(--live-soft);
+		font-family: var(--mono);
+		font-size: 0.72rem;
+		padding: 0;
+	}
+
+	.notice {
+		color: var(--fg-soft);
+		font-size: 0.9rem;
+		padding: var(--space-xl);
 		text-align: center;
 	}
 	.notice.error {
@@ -357,5 +425,9 @@
 
 	.sentinel {
 		min-height: 1px;
+	}
+	@media (max-width: 46rem) {
+		main { padding-inline: 0; }
+		.stream { padding-inline: var(--space-md); }
 	}
 </style>

@@ -6,7 +6,18 @@
  */
 
 import type { Facets, Post, PostFilter, Settings, StreamEvent, ViewWithUnread } from '../shared/types';
-import { fetchFacets, fetchPosts, fetchSettings, fetchViews, markViewSeen, saveSettings, subscribe } from './api';
+import {
+	fetchFacets,
+	fetchPosts,
+	fetchSettings,
+	fetchViews,
+	markAllSeen as markAllSeenRequest,
+	markPostSeen,
+	markPostUnseen,
+	markViewSeen,
+	saveSettings,
+	subscribe
+} from './api';
 
 const PAGE_SIZE = 50;
 
@@ -59,6 +70,13 @@ export class Feed {
 		muted_tags: []
 	});
 
+	/**
+	 * When true, a post is also marked seen once it scrolls out of view -- not only
+	 * when clicked or selected. Mirrors the `mark_seen_on_scroll` setting; the page
+	 * owns the scroll observer that acts on it.
+	 */
+	markSeenOnScroll = $state(false);
+
 	/** Index of the keyboard-selected card. -1 when nothing is selected. */
 	selected = $state(-1);
 
@@ -102,6 +120,7 @@ export class Feed {
 				muted_sources: settings.muted_sources,
 				muted_tags: settings.muted_tags
 			};
+			this.markSeenOnScroll = settings.mark_seen_on_scroll;
 		} catch {
 			/* fall back to nothing muted */
 		}
@@ -140,6 +159,60 @@ export class Feed {
 			await saveSettings({ [key]: next[key] });
 			await this.load(); // the muted posts should disappear now
 		} catch (err) {
+			this.error = String(err);
+		}
+	}
+
+	/**
+	 * Read state.
+	 *
+	 * Marking is optimistic: the card updates immediately and the request rides
+	 * behind it, because a reader clicking through a feed should never wait on a
+	 * round trip to see the marker land. A failed request rolls the local flag back
+	 * rather than leaving the UI claiming something the server didn't record.
+	 */
+
+	/** Marks a post seen (clicked, keyboard-selected, or scrolled past). */
+	async markSeen(id: string): Promise<void> {
+		const post = this.posts.find((p) => p.id === id) ?? this.pending.find((p) => p.id === id);
+		if (!post || post.seen) return; // already seen: no visible change, no round trip
+		post.seen = true;
+		try {
+			await markPostSeen(id);
+		} catch {
+			post.seen = false;
+		}
+	}
+
+	/** Marks a post unread again -- the ⋯ menu's "Mark as unread". */
+	async markUnseen(id: string): Promise<void> {
+		const post = this.posts.find((p) => p.id === id) ?? this.pending.find((p) => p.id === id);
+		if (!post || !post.seen) return;
+		post.seen = false;
+		try {
+			await markPostUnseen(id);
+		} catch {
+			post.seen = true;
+		}
+	}
+
+	/**
+	 * Marks everything matching the current filter as read.
+	 *
+	 * The loaded and queued posts are a subset of what the server marks, so flip
+	 * them locally right away and let the request reconcile the rest (including
+	 * posts below the fold that were never loaded).
+	 */
+	async markAllSeen(): Promise<void> {
+		const prevPosts = this.posts.map((p) => p.seen);
+		const prevPending = this.pending.map((p) => p.seen);
+		for (const p of this.posts) p.seen = true;
+		for (const p of this.pending) p.seen = true;
+		try {
+			await markAllSeenRequest(this.filter);
+		} catch (err) {
+			this.posts.forEach((p, i) => (p.seen = prevPosts[i]));
+			this.pending.forEach((p, i) => (p.seen = prevPending[i]));
 			this.error = String(err);
 		}
 	}
@@ -257,6 +330,9 @@ export class Feed {
 		if (this.posts.length === 0) return -1;
 		const next = Math.min(Math.max(this.selected + delta, 0), this.posts.length - 1);
 		this.selected = next;
+
+		// Landing on a card counts as seeing it, same as a click.
+		void this.markSeen(this.posts[next].id);
 
 		// Selecting near the bottom should pull the next page in, or j-ing to the
 		// end would just stop.

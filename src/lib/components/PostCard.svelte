@@ -3,6 +3,7 @@
 	import { openExternal } from '../api';
 	import { absoluteTime, KIND_TONE, relativeTime, sourceColor } from '../format';
 	import { renderMarkdown } from '../markdown';
+	import { needsProgressiveDisclosure, resolvePostPreview } from '../timeline';
 
 	interface Props {
 		post: Post;
@@ -10,26 +11,63 @@
 		onFilter: (dimension: 'source' | 'project' | 'repo' | 'kind' | 'tag', value: string) => void;
 		/** Hides this source/tag from the timeline for good (until unmuted). */
 		onMute: (dimension: 'source' | 'tag', value: string) => void;
+		/** Sets this post's read state: true when it's interacted with, false to mark unread. */
+		onSeenChange: (seen: boolean) => void;
 		/** Keyboard selection (j/k). */
 		selected?: boolean;
 		/** Just arrived live -- its node on the rail pulses briefly. */
 		fresh?: boolean;
 	}
 
-	let { post, onFilter, onMute, selected = false, fresh = false }: Props = $props();
+	let { post, onFilter, onMute, onSeenChange, selected = false, fresh = false }: Props = $props();
 
 	let menuOpen = $state(false);
+	let expanded = $state(false);
 
 	// Recomputed only when the body changes -- sanitizing markdown on every
 	// re-render of a 50-card feed would be wasteful.
 	const body = $derived(post.body ? renderMarkdown(post.body) : null);
+	const collapsible = $derived(Boolean(post.body && (post.summary?.trim() || needsProgressiveDisclosure(post.body))));
+	const preview = $derived(resolvePostPreview(post));
 	const tone = $derived(KIND_TONE[post.kind] ?? null);
 	// `meta` minus the keys already surfaced as chips or badges, so the raw view
 	// adds information instead of repeating it.
-	const SHOWN = ['project', 'repo', 'url', 'state', 'author'];
+	const SHOWN = ['project', 'repo', 'url', 'links', 'state', 'author'];
 	const extraMeta = $derived(
 		Object.fromEntries(Object.entries(post.meta).filter(([key]) => !SHOWN.includes(key)))
 	);
+
+	/** Only http(s) survives: `meta` is open JSON any client can write, so a link
+	 *  could carry a `javascript:` or other scheme we must not hand to the OS. */
+	function httpUrl(value: unknown): string | null {
+		if (typeof value !== 'string') return null;
+		try {
+			const url = new URL(value);
+			return url.protocol === 'http:' || url.protocol === 'https:' ? value : null;
+		} catch {
+			return null;
+		}
+	}
+
+	// The card's links, deduped by URL: the named `meta.links` first, then the
+	// single canonical `meta.url` as a plain "open" chip if nothing already covers
+	// it. Validated here rather than trusted, since anything can post to the API.
+	const links = $derived.by(() => {
+		const out: { label: string; url: string }[] = [];
+		const seen = new Set<string>();
+		const push = (label: unknown, rawUrl: unknown) => {
+			const url = httpUrl(rawUrl);
+			if (!url || seen.has(url) || typeof label !== 'string' || !label.trim()) return;
+			seen.add(url);
+			out.push({ label: label.trim(), url });
+		};
+
+		if (Array.isArray(post.meta.links)) {
+			for (const link of post.meta.links) push(link?.label, link?.url);
+		}
+		push('open', post.meta.url);
+		return out;
+	});
 
 	// NB: not called `state` -- a local by that name makes Svelte parse the
 	// `$state(...)` rune above as a store subscription of it, which is a baffling
@@ -69,11 +107,20 @@
 
 <svelte:window onclick={() => (menuOpen = false)} />
 
+<!-- The whole card is a "seen" target: clicking anywhere in it marks it read, the
+     same as selecting it with j/k. data-post-id lets the page's scroll observer
+     mark it seen once it leaves the viewport (when that setting is on). -->
+<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions, a11y_no_noninteractive_element_interactions -->
 <article
 	class="post"
 	class:alert={tone === 'alert'}
 	class:selected
 	class:fresh
+	class:seen={post.seen}
+	class:collapsible
+	class:expanded
+	data-post-id={post.id}
+	onclick={() => onSeenChange(true)}
 >
 	<!-- Left gutter: the time, in the machine voice, sitting on the rail node. -->
 	<div class="when">
@@ -111,6 +158,11 @@
 				{#if menuOpen}
 					<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
 					<div class="menu" onclick={(e) => e.stopPropagation()}>
+						{#if post.seen}
+							<button onclick={() => { onSeenChange(false); menuOpen = false; }}>
+								Mark as unread
+							</button>
+						{/if}
 						<button onclick={() => { onMute('source', post.source); menuOpen = false; }}>
 							Mute source <code>{post.source}</code>
 						</button>
@@ -124,10 +176,32 @@
 			</div>
 		</header>
 
-		{#if body}
-			<!-- Sanitized in renderMarkdown(); see the note there on why this is safe. -->
-			<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-			<div class="body" onclick={interceptLinks}>{@html body}</div>
+		{#if preview || body}
+			{#if collapsible && !expanded}
+				<p class="preview">{preview}</p>
+			{:else if body}
+				<!-- Sanitized in renderMarkdown(); see the note there on why this is safe. -->
+				<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+				<div class="body" onclick={interceptLinks}>{@html body}</div>
+			{:else}
+				<p class="preview">{preview}</p>
+			{/if}
+			{#if collapsible}
+				<button
+					class="disclosure"
+					data-disclosure-toggle
+					aria-expanded={expanded}
+					aria-label={expanded ? 'Collapse post details' : 'Expand post details'}
+					title={expanded ? 'Show less' : 'Show details'}
+					onclick={(event) => {
+						event.stopPropagation();
+						expanded = !expanded;
+						if (expanded) onSeenChange(true);
+					}}
+				>
+					<span aria-hidden="true">{expanded ? '↑' : '↓'}</span>
+				</button>
+			{/if}
 		{/if}
 
 		<footer>
@@ -152,9 +226,9 @@
 				<button class="chip tag" onclick={() => onFilter('tag', tag)}>{tag}</button>
 			{/each}
 
-			{#if post.meta.url}
-				<button class="chip link" onclick={() => openExternal(String(post.meta.url))}>open ↗</button>
-			{/if}
+			{#each links as link (link.url)}
+				<button class="chip link" onclick={() => openExternal(link.url)}>{link.label} ↗</button>
+			{/each}
 
 			{#if Object.keys(extraMeta).length > 0}
 				<details class="meta">
@@ -171,65 +245,47 @@
 	   sitting on the spine that the feed draws behind the whole column. */
 	.post {
 		display: grid;
-		grid-template-columns: var(--gutter) 1fr;
-		column-gap: 18px;
-		padding: 0.7rem 0 0.75rem;
-		border-bottom: 1px solid var(--rail-soft);
+		grid-template-columns: 3.5rem 1fr;
+		gap: var(--space-md);
+		padding: var(--space-md);
+		margin-block: var(--space-xs);
+		border: 1px solid var(--rail-soft);
+		border-radius: var(--radius-md);
+		background: var(--surface);
+		transition: transform 180ms var(--ease-out), border-color 180ms var(--ease-out), background 180ms var(--ease-out);
 	}
 	.post:hover {
-		background: color-mix(in srgb, var(--surface) 55%, transparent);
+		transform: translateY(-1px);
+		border-color: var(--rail);
+		background: var(--surface-raised);
 	}
 	.post.selected {
-		background: var(--inset);
+		border-color: var(--live);
+		background: color-mix(in oklch, var(--surface-raised) 88%, var(--live));
 	}
 
 	/* --- the gutter + the node on the rail --- */
 	.when {
-		position: relative;
-		text-align: right;
-		padding-top: 0.1rem;
-		padding-right: 8px;
+		text-align: left;
+		padding-top: 0.15rem;
 	}
 	.when time {
-		font-family: var(--mono);
-		font-size: 0.72rem;
-		color: var(--fg-dim);
+		font-size: 0.75rem;
+		font-weight: 650;
+		color: var(--fg-soft);
 		white-space: nowrap;
 	}
 	.post.selected .when time {
 		color: var(--live-soft);
 	}
 	/* The node. Quiet by default; the rail is what carries the eye, not the dots. */
-	.when::after {
-		content: '';
-		position: absolute;
-		top: 0.32rem;
-		right: calc(-9px - (var(--node) / 2) + 0.5px);
-		width: var(--node);
-		height: var(--node);
-		border-radius: 50%;
-		background: var(--ink);
-		border: 1.5px solid var(--rail);
-		box-shadow: 0 0 0 3px var(--ink); /* mask the spine behind the node */
-	}
-	.post:hover .when::after {
-		border-color: var(--fg-dim);
-	}
-	.post.selected .when::after {
-		border-color: var(--live);
-	}
-	.post.alert .when::after {
-		border-color: var(--alert);
-		background: color-mix(in srgb, var(--alert) 30%, var(--ink));
-	}
-	.post.fresh .when::after {
-		border-color: var(--live);
-		background: var(--live);
-		animation: node-pulse 2.4s ease-out infinite;
-	}
+	.post:not(.seen) { border-color: color-mix(in oklch, var(--live) 55%, var(--rail)); }
+	.post.alert { border-color: color-mix(in oklch, var(--alert) 65%, var(--rail)); }
+	.post.fresh { animation: card-arrival 320ms var(--ease-out); }
+	@keyframes card-arrival { from { transform: translateY(-0.4rem); filter: brightness(1.25); } }
 	@keyframes node-pulse {
 		0% {
-			box-shadow: 0 0 0 3px var(--ink), 0 0 0 3px rgb(246 169 53 / 0.5);
+				box-shadow: none;
 		}
 		70% {
 			box-shadow: 0 0 0 3px var(--ink), 0 0 0 9px rgb(246 169 53 / 0);
@@ -246,7 +302,9 @@
 
 	.content {
 		min-width: 0;
+		position: relative;
 	}
+	.post.collapsible .content { padding-right: 3rem; }
 
 	.more {
 		position: relative;
@@ -257,7 +315,8 @@
 		border: none;
 		background: transparent;
 		color: var(--fg-dim);
-		padding: 0 0.15rem;
+		min-width: 2.75rem;
+		min-height: 2.75rem;
 		line-height: 1;
 		opacity: 0;
 	}
@@ -275,13 +334,13 @@
 		position: absolute;
 		top: 100%;
 		right: 0;
-		z-index: 10;
+		z-index: var(--z-dropdown);
 		min-width: 12rem;
 		padding: 0.25rem;
 		border-radius: 8px;
 		border: 1px solid var(--rail);
 		background: var(--surface);
-		box-shadow: 0 8px 24px rgb(0 0 0 / 0.5);
+		box-shadow: 0 6px 8px oklch(0.06 0.03 255 / 0.55);
 		display: flex;
 		flex-direction: column;
 	}
@@ -306,46 +365,46 @@
 
 	header {
 		display: flex;
-		align-items: baseline;
-		gap: 0.5rem;
+		align-items: center;
+		gap: var(--space-xs) var(--space-sm);
+		flex-wrap: wrap;
 	}
 
 	/* Human voice: the headline is the one thing a person reads on each row. */
 	h2 {
 		font-family: var(--sans);
-		font-size: 0.93rem;
-		font-weight: 500;
+		font-size: 1rem;
+		font-weight: 720;
 		margin: 0;
 		flex: 1;
 		min-width: 0;
-		line-height: 1.35;
+		line-height: 1.25;
 		word-break: break-word;
 	}
 	.post.alert h2 {
 		color: #ffd9d2;
 	}
+	/* Already read: let the headline recede so the eye skips to what's still unread. */
+	.post.seen h2 {
+		color: var(--fg-soft);
+	}
 
 	/* Machine voice: source, kind, and everything below is mono and quiet. */
 	.source {
-		font-family: var(--mono);
-		font-size: 0.68rem;
-		font-weight: 600;
-		letter-spacing: -0.01em;
-		padding: 0.08rem 0.4rem;
-		border-radius: 5px;
+		font-size: 0.75rem;
+		font-weight: 750;
+		padding: var(--space-xs) var(--space-sm);
+		border-radius: var(--radius-sm);
 		border: none;
-		color: var(--source-color);
-		background: color-mix(in srgb, var(--source-color) 14%, transparent);
+		color: var(--ink);
+		background: var(--source-color);
 		white-space: nowrap;
 	}
 
 	.kind {
-		font-family: var(--mono);
-		font-size: 0.62rem;
-		text-transform: uppercase;
-		letter-spacing: 0.08em;
-		padding: 0.1rem 0.36rem;
-		border-radius: 5px;
+		font-size: 0.75rem;
+		padding: var(--space-xs) var(--space-sm);
+		border-radius: var(--radius-sm);
 		color: var(--fg-dim);
 		border: 1px solid var(--rail);
 		background: transparent;
@@ -365,12 +424,38 @@
 
 	.body {
 		font-family: var(--sans);
-		margin: 0.35rem 0 0 0;
+		margin: var(--space-xs) 0 0;
 		font-size: 0.86rem;
 		color: var(--fg-soft);
-		line-height: 1.5;
+		line-height: 1.42;
 		overflow-wrap: break-word;
 	}
+	.preview {
+		margin: var(--space-xs) 0 0;
+		overflow: hidden;
+		color: var(--fg-soft);
+		font-size: 0.84rem;
+		line-height: 1.35;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.post.collapsible:not(.expanded) footer { display: none; }
+	.disclosure {
+		position: absolute;
+		right: 0;
+		top: 1.9rem;
+		display: grid;
+		place-items: center;
+		width: 2.75rem;
+		min-height: 2.75rem;
+		padding: 0;
+		border: none;
+		background: transparent;
+		color: var(--live-soft);
+		font-size: 0.9rem;
+		font-weight: 750;
+	}
+	.disclosure:hover { color: var(--fg); }
 	.body :global(p) {
 		margin: 0 0 0.4rem;
 	}
@@ -378,8 +463,7 @@
 		font-family: var(--mono);
 		background: var(--inset);
 		border: 1px solid var(--rail-soft);
-		border-left: 2px solid var(--rail);
-		padding: 0.55rem 0.7rem;
+		padding: var(--space-md);
 		border-radius: 7px;
 		overflow-x: auto;
 		font-size: 0.78rem;
@@ -405,17 +489,16 @@
 		display: flex;
 		flex-wrap: wrap;
 		align-items: center;
-		gap: 0.34rem;
-		margin-top: 0.5rem;
+		gap: var(--space-xs) var(--space-sm);
+		margin-top: var(--space-sm);
 	}
 	footer:empty {
 		display: none;
 	}
 
 	.chip {
-		font-family: var(--mono);
-		font-size: 0.7rem;
-		padding: 0.07rem 0.45rem;
+		font-size: 0.75rem;
+		padding: var(--space-xs) var(--space-sm);
 		border-radius: 999px;
 		border: 1px solid var(--rail);
 		color: var(--fg-dim);
@@ -435,12 +518,17 @@
 	.chip.tag:hover::before {
 		color: var(--live);
 	}
+	.chip.link {
+		border-color: color-mix(in oklch, var(--live) 60%, var(--rail));
+		background: color-mix(in oklch, var(--live) 12%, var(--surface));
+		color: var(--live-soft);
+		font-weight: 700;
+	}
 
 	/* PR/issue state. Not a filter chip — it's a fact about the item, not
 	   something you'd want to narrow the feed by. */
 	.state {
-		font-family: var(--mono);
-		font-size: 0.66rem;
+		font-size: 0.75rem;
 		padding: 0.07rem 0.42rem;
 		border-radius: 999px;
 		border: 1px solid currentColor;
@@ -460,8 +548,7 @@
 	}
 
 	.author {
-		font-family: var(--mono);
-		font-size: 0.7rem;
+		font-size: 0.75rem;
 		color: var(--fg-dim);
 	}
 
@@ -488,5 +575,11 @@
 		cursor: pointer;
 		font: inherit;
 		font-size: inherit;
+	}
+	@media (max-width: 40rem) {
+		.post { grid-template-columns: 1fr; gap: var(--space-sm); }
+		.when { order: 2; }
+		header h2 { flex-basis: 100%; order: 2; }
+		.more { margin-left: auto; }
 	}
 </style>

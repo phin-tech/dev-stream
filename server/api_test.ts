@@ -2,7 +2,7 @@ import { assert, assertEquals } from '@std/assert';
 import { createApiHandler } from './api.ts';
 import { openDb } from './db.ts';
 import { Broadcaster } from './events.ts';
-import type { Post, PostPage, ServerInfo, StreamEvent } from '../src/shared/types.ts';
+import type { Post, PostPage, ServerInfo, SourceStatus, StreamEvent } from '../src/shared/types.ts';
 
 const TOKEN = 'test-token';
 
@@ -11,7 +11,10 @@ const TOKEN = 'test-token';
  * real request takes, minus the port. Network-level behaviour is covered by the
  * end-to-end curl script.
  */
-function harness(onFocusRequest?: () => void) {
+function harness(
+	onFocusRequest?: () => void,
+	install?: (url: string) => Promise<SourceStatus>
+) {
 	const db = openDb(':memory:');
 	const broadcaster = new Broadcaster();
 	const info: ServerInfo = {
@@ -21,7 +24,10 @@ function harness(onFocusRequest?: () => void) {
 		port: 4517,
 		started_at: new Date().toISOString()
 	};
-	const handle = createApiHandler({ db, broadcaster, token: TOKEN, info, dbPath: ':memory:', onFocusRequest });
+	const handle = createApiHandler({
+		db, broadcaster, token: TOKEN, info, dbPath: ':memory:', onFocusRequest,
+		plugins: install ? { install } : undefined
+	});
 
 	const call = (method: string, path: string, body?: unknown, token: string | null = TOKEN) =>
 		handle(
@@ -37,6 +43,26 @@ function harness(onFocusRequest?: () => void) {
 
 	return { db, broadcaster, call };
 }
+
+Deno.test('installing a GitHub plugin delegates to the installer and returns the source', async () => {
+	const urls: string[] = [];
+	const installed = {
+		slug: 'github', label: 'GitHub', origin: 'plugin' as const, trusted: false,
+		enabled: false, configured: false, fields: [], config: {}, cursor: null,
+		last_error: null, last_polled_at: null
+	};
+	const { call } = harness(undefined, (url) => {
+		urls.push(url);
+		return Promise.resolve(installed);
+	});
+
+	const response = await call('POST', '/api/plugins/install', {
+		url: 'https://github.com/phin-tech/dev-stream-plugins/tree/main/github'
+	});
+	assertEquals(response.status, 201);
+	assertEquals(await response.json(), installed);
+	assertEquals(urls, ['https://github.com/phin-tech/dev-stream-plugins/tree/main/github']);
+});
 
 Deno.test('health is unauthenticated and identifies the app', async () => {
 	const { call } = harness();
@@ -164,6 +190,48 @@ Deno.test('a bad limit is rejected', async () => {
 Deno.test('an unknown post id is a 404', async () => {
 	const { call } = harness();
 	assertEquals((await call('GET', '/api/posts/nope')).status, 404);
+});
+
+Deno.test('a post can be marked seen, unread again, and 404s an unknown id', async () => {
+	const { call } = harness();
+	const created = (await (await call('POST', '/api/posts', { source: 'ci', title: 'a build' })).json()) as Post;
+
+	// Fresh out of the box, unseen...
+	assertEquals(((await (await call('GET', '/api/posts')).json()) as PostPage).posts[0].seen, false);
+
+	// ...marking it seen is reflected on the next read...
+	const seen = (await (await call('POST', `/api/posts/${created.id}/seen`)).json()) as Post;
+	assertEquals(seen.seen, true);
+	assertEquals(((await (await call('GET', '/api/posts')).json()) as PostPage).posts[0].seen, true);
+
+	// ...and marking it unread reverses it.
+	const unseen = (await (await call('POST', `/api/posts/${created.id}/unseen`)).json()) as Post;
+	assertEquals(unseen.seen, false);
+
+	// An id that isn't in the timeline is a 404 rather than a stray marker.
+	assertEquals((await call('POST', '/api/posts/nope/seen')).status, 404);
+});
+
+Deno.test('mark-all-seen clears the filtered set and reports the count', async () => {
+	const { call } = harness();
+	await call('POST', '/api/posts', [
+		{ source: 'ci', title: 'ci one' },
+		{ source: 'ci', title: 'ci two' },
+		{ source: 'linear', title: 'unrelated' }
+	]);
+
+	// The body is the active filter, so only CI is cleared.
+	const res = await call('POST', '/api/seen', { source: ['ci'] });
+	assertEquals(res.status, 200);
+	assertEquals((await res.json()).marked, 2);
+
+	const ci = ((await (await call('GET', '/api/posts?source=ci')).json()) as PostPage).posts;
+	assertEquals(ci.every((p) => p.seen), true);
+	const linear = ((await (await call('GET', '/api/posts?source=linear')).json()) as PostPage).posts;
+	assertEquals(linear[0].seen, false);
+
+	// An empty body means "the whole timeline".
+	assertEquals((await (await call('POST', '/api/seen', {})).json()).marked, 1);
 });
 
 Deno.test('CORS preflight is answered', async () => {

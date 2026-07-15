@@ -77,7 +77,12 @@ Deno.test('facets ignore the cursor: they describe the set, not the page', () =>
 	assertEquals(values(paged.source), values(unpaged.source));
 });
 
-const DEFAULT_SETTINGS = { retention_days: 0, muted_sources: [], muted_tags: [] };
+const DEFAULT_SETTINGS = {
+	retention_days: 0,
+	muted_sources: [],
+	muted_tags: [],
+	mark_seen_on_scroll: false
+};
 
 Deno.test('settings fall back to defaults on an empty database', () => {
 	const db = openDb(':memory:');

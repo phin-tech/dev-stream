@@ -8,11 +8,12 @@
  */
 
 import type { Db } from './db.ts';
-import type { PostQuery, ServerInfo, SettingsInfo, StreamEvent } from '../src/shared/types.ts';
+import type { PostQuery, ServerInfo, SettingsInfo, SourceStatus, StreamEvent } from '../src/shared/types.ts';
 import { countPosts, getPost, insertPosts, queryFacets, queryPosts, ValidationError } from './posts.ts';
+import { markAllSeen, markSeen, markUnseen } from './seen.ts';
 import { getSettings, updateSettings } from './settings.ts';
 import { createView, deleteView, listViews, markViewSeen, updateView } from './views.ts';
-import { listSources, saveSourceConfig } from './sources/store.ts';
+import { listSources, saveSourceConfig, setSourceTrust } from './sources/store.ts';
 import { Broadcaster } from './events.ts';
 import { regenerateToken, tokenMatches } from './config.ts';
 import { diag } from './diag.ts';
@@ -32,6 +33,9 @@ export interface ApiOptions {
 	sources?: {
 		sync(): void;
 		pollNow(slug: string): Promise<{ posts: number; error?: string }>;
+	};
+	plugins?: {
+		install(url: string): Promise<SourceStatus>;
 	};
 }
 
@@ -173,6 +177,47 @@ export function createApiHandler(opts: ApiOptions): (req: Request) => Promise<Re
 			return post ? json(post) : error(404, 'post not found');
 		}
 
+		// Mark every post matching the given filter as seen ("mark all as read").
+		// The filter arrives as a PostFilter body -- the timeline's active filter --
+		// so clearing while a view is open clears only that view. Mutes are layered
+		// on here, never trusted from the client, exactly as GET /api/posts does.
+		if (path === '/api/seen' && req.method === 'POST') {
+			const settings = getSettings(db);
+			let body: unknown = {};
+			if (req.headers.get('content-type')?.includes('application/json')) {
+				try {
+					body = await req.json();
+				} catch {
+					return error(400, 'body must be valid JSON');
+				}
+			}
+			if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+				return error(400, 'filter must be a JSON object');
+			}
+			const query: PostQuery = {
+				...(body as PostQuery),
+				exclude_source: settings.muted_sources,
+				exclude_tag: settings.muted_tags
+			};
+			try {
+				return json({ marked: markAllSeen(db, query) });
+			} catch (err) {
+				if (err instanceof ValidationError) return error(400, err.message);
+				throw err;
+			}
+		}
+
+		// Toggle one post's read state. Returns the post so the client can sync,
+		// and 404s an id that isn't in the timeline rather than leaving a marker.
+		const seenPostMatch = path.match(/^\/api\/posts\/([^/]+)\/(seen|unseen)$/);
+		if (seenPostMatch && req.method === 'POST') {
+			const id = decodeURIComponent(seenPostMatch[1]);
+			if (!getPost(db, id)) return error(404, 'post not found');
+			if (seenPostMatch[2] === 'seen') markSeen(db, id);
+			else markUnseen(db, id);
+			return json(getPost(db, id));
+		}
+
 		// Populates the filter bar. Takes the same query params as GET /api/posts,
 		// so the UI can ask "given what I've already picked, what's left?"
 		if (path === '/api/facets' && req.method === 'GET') {
@@ -249,12 +294,44 @@ export function createApiHandler(opts: ApiOptions): (req: Request) => Promise<Re
 			return json({ sources: listSources(db) });
 		}
 
+		if (path === '/api/plugins/install' && req.method === 'POST') {
+			if (!opts.plugins) return error(503, 'plugin installation is not available');
+			let body: unknown;
+			try {
+				body = await req.json();
+			} catch {
+				return error(400, 'body must be valid JSON');
+			}
+			const url = typeof body === 'object' && body !== null ? (body as { url?: unknown }).url : undefined;
+			if (typeof url !== 'string' || !url.trim()) return error(400, 'url is required');
+			try {
+				return json(await opts.plugins.install(url.trim()), 201);
+			} catch (err) {
+				return error(400, err instanceof Error ? err.message : String(err));
+			}
+		}
+
 		const sourceMatch = path.match(/^\/api\/sources\/([^/]+)$/);
 		if (sourceMatch && req.method === 'PUT') {
 			const slug = decodeURIComponent(sourceMatch[1]);
 			return await withJsonBody(req, (body) => {
 				const status = saveSourceConfig(db, slug, body);
 				// Enabling a source should start polling now, not after a restart.
+				opts.sources?.sync();
+				return json(status);
+			});
+		}
+
+		// Grants or revokes a plugin's trust. Separate from PUT /api/sources/:slug
+		// because trusting is a different decision from configuring: it is the one
+		// place the user accepts a permission list, and it must not be reachable as
+		// a side effect of saving a token.
+		const trustMatch = path.match(/^\/api\/sources\/([^/]+)\/trust$/);
+		if (trustMatch && req.method === 'POST') {
+			const slug = decodeURIComponent(trustMatch[1]);
+			return await withJsonBody(req, (body) => {
+				const status = setSourceTrust(db, slug, body);
+				// Revoking trust disables the source; make the runner notice now.
 				opts.sources?.sync();
 				return json(status);
 			});

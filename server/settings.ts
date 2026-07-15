@@ -16,7 +16,10 @@ const DEFAULTS: Settings = {
 	// retention is opt-in.
 	retention_days: 0,
 	muted_sources: [],
-	muted_tags: []
+	muted_tags: [],
+	// Off by default: clicking or selecting a post always marks it seen, but
+	// "scrolled past" only counts as seen when the reader opts in.
+	mark_seen_on_scroll: false
 };
 
 export function getSettings(db: Db): Settings {
@@ -57,6 +60,12 @@ export function updateSettings(db: Db, patch: unknown): Settings {
 		if (key === 'muted_sources' || key === 'muted_tags') {
 			if (!Array.isArray(value) || value.some((v) => typeof v !== 'string')) {
 				throw new ValidationError(`${key} must be an array of strings`);
+			}
+		}
+
+		if (key === 'mark_seen_on_scroll') {
+			if (typeof value !== 'boolean') {
+				throw new ValidationError('mark_seen_on_scroll must be a boolean');
 			}
 		}
 	}

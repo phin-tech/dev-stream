@@ -12,10 +12,15 @@ import { createApiHandler } from './api.ts';
 import { readOrCreateToken, writePort, clearPort } from './config.ts';
 import { type Db, openDb } from './db.ts';
 import { Broadcaster } from './events.ts';
-import { APP_VERSION, DEFAULT_PORT, dbPath, ensureHome, isDefaultHome } from './paths.ts';
+import { APP_VERSION, DEFAULT_PORT, dbPath, ensureHome, isDefaultHome, pluginsDir } from './paths.ts';
 import { drainSpool } from './spool.ts';
 import { startRetentionSweep } from './retention.ts';
 import { startSourceRunner } from './sources/runner.ts';
+import { registerPluginWorkers } from './sources/registry.ts';
+import { discoverPlugins } from './plugins/manifest.ts';
+import { assertSandboxAvailable, createPluginWorker } from './plugins/adapter.ts';
+import { GitHubContentsSource, installPluginFromGitHub } from './plugins/install.ts';
+import { describeSource } from './sources/store.ts';
 import { diag } from './diag.ts';
 
 diag('EVAL server/serve.ts body (backend module graph now evaluated)');
@@ -53,9 +58,27 @@ export async function startBackend(opts: StartOptions = {}): Promise<Backend> {
 		started_at: new Date().toISOString()
 	};
 
-	// Built-in integrations (GitHub, Linear). Privileged only in that they skip the
-	// HTTP hop -- their posts still go through insertPosts like everyone else's.
+	// Source plugins: TypeScript modules under ~/.dev-stream/plugins, each polled
+	// inside a worker scoped to exactly the permissions its manifest declares —
+	// and only once the user has explicitly trusted that manifest in Settings.
+	// Discovery itself runs no plugin code; it only reads manifest.json files.
+	const plugins = await discoverPlugins(pluginsDir());
+	if (plugins.length > 0) {
+		// Before anything else touches a scoped worker: a runtime without
+		// --unstable-worker-options aborts (uncatchably) on the first scoped
+		// spawn. Probing here makes that a clear startup failure instead of the
+		// app dying under an "Enable" click days from now. No plugins, no probe —
+		// a plugin-free install never needs the flag.
+		assertSandboxAvailable();
+		registerPluginWorkers(plugins.map((plugin) => createPluginWorker(plugin)));
+		console.log(`[plugins] found ${plugins.map((p) => p.manifest.slug).join(', ')}`);
+	}
+
+	// Built-in integrations (GitHub, Linear) plus any trusted plugins. Privileged
+	// only in that they skip the HTTP hop -- their posts still go through
+	// insertPosts like everyone else's.
 	const sources = startSourceRunner(db, broadcaster);
+	const pluginSource = new GitHubContentsSource();
 
 	const handler = createApiHandler({
 		db,
@@ -64,7 +87,17 @@ export async function startBackend(opts: StartOptions = {}): Promise<Backend> {
 		info,
 		dbPath: dbFile,
 		onFocusRequest: opts.onFocusRequest,
-		sources
+		sources,
+		plugins: {
+			async install(url) {
+				const plugin = await installPluginFromGitHub(url, { pluginsRoot: pluginsDir(), source: pluginSource });
+				assertSandboxAvailable();
+				const worker = createPluginWorker(plugin);
+				registerPluginWorkers([worker]);
+				sources.sync();
+				return describeSource(db, worker);
+			}
+		}
 	});
 
 	const server = listen(handler);

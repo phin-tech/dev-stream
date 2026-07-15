@@ -4,6 +4,7 @@
 		apiConfig,
 		fetchSettings,
 		fetchSources,
+		installPlugin,
 		regenerateToken,
 		revealInFinder,
 		saveSettings
@@ -15,10 +16,13 @@
 	let token = $state('');
 	let tokenVisible = $state(false);
 	let retention = $state(0);
+	let markSeenOnScroll = $state(false);
 	let status = $state<string | null>(null);
 	let error = $state<string | null>(null);
 	let confirmingRegenerate = $state(false);
 	let sources = $state<SourceStatus[]>([]);
+	let pluginUrl = $state('');
+	let installingPlugin = $state(false);
 
 	onMount(async () => {
 		try {
@@ -29,6 +33,7 @@
 			]);
 			info = settings;
 			retention = settings.retention_days;
+			markSeenOnScroll = settings.mark_seen_on_scroll;
 			token = config.token;
 			sources = integrations;
 		} catch (err) {
@@ -38,6 +43,22 @@
 
 	function onSourceChange(updated: SourceStatus) {
 		sources = sources.map((s) => (s.slug === updated.slug ? updated : s));
+	}
+
+	async function onPluginInstall() {
+		error = null;
+		status = null;
+		installingPlugin = true;
+		try {
+			const installed = await installPlugin(pluginUrl);
+			sources = [...sources.filter((source) => source.slug !== installed.slug), installed];
+			pluginUrl = '';
+			status = `${installed.label} installed. Review its permissions before trusting it.`;
+		} catch (err) {
+			error = String(err);
+		} finally {
+			installingPlugin = false;
+		}
 	}
 
 	async function onRetentionSave() {
@@ -54,6 +75,20 @@
 		}
 	}
 
+	async function onMarkSeenToggle() {
+		error = null;
+		try {
+			const saved = await saveSettings({ mark_seen_on_scroll: markSeenOnScroll });
+			markSeenOnScroll = saved.mark_seen_on_scroll;
+			status = saved.mark_seen_on_scroll
+				? 'Posts are marked read as they scroll out of view.'
+				: 'Posts are marked read only when clicked or selected.';
+		} catch (err) {
+			markSeenOnScroll = !markSeenOnScroll; // the save failed; put the toggle back
+			error = String(err);
+		}
+	}
+
 	async function unmute(key: 'muted_sources' | 'muted_tags', value: string) {
 		if (!info) return;
 		error = null;
@@ -63,6 +98,16 @@
 			info = { ...info, [key]: next };
 			status = `Unmuted ${value}. Its history is back in the timeline.`;
 		} catch (err) {
+			error = String(err);
+		}
+	}
+
+	async function copy(text: string) {
+		try {
+			await navigator.clipboard.writeText(text);
+			status = 'Copied to clipboard.';
+		} catch (err) {
+			// The command is selectable in place, so a clipboard denial is not fatal.
 			error = String(err);
 		}
 	}
@@ -81,7 +126,13 @@
 </script>
 
 <main>
-	<h1>Settings</h1>
+	<header class="page-head">
+		<div>
+			<h1>Settings</h1>
+			<p>Connections, storage, reading preferences, and local access.</p>
+		</div>
+		<span class="local-badge">Local only</span>
+	</header>
 
 	{#if error}<p class="error">{error}</p>{/if}
 	{#if status}<p class="status">{status}</p>{/if}
@@ -143,11 +194,39 @@
 		</section>
 
 		<section>
+			<h2>Reading</h2>
+			<dl>
+				<dt>Mark seen</dt>
+				<dd>
+					<label class="toggle">
+						<input
+							type="checkbox"
+							bind:checked={markSeenOnScroll}
+							onchange={onMarkSeenToggle}
+						/>
+						on scroll past
+					</label>
+				</dd>
+			</dl>
+			<p class="dim note">
+				A post is always marked read when you click it or select it with j/k. Turn this on to
+				also mark it read once it scrolls up out of view.
+			</p>
+		</section>
+
+		<section>
 			<h2>Integrations</h2>
 			<p class="dim note-top">
-				Built-in pollers. They post through the same API as everything else, so their
-				activity interleaves with your local events rather than living in a separate tab.
+				Installed plugins post through the same API as everything else. A plugin cannot run
+				until you review and trust its requested permissions.
 			</p>
+			<form class="plugin-install" onsubmit={(event) => { event.preventDefault(); onPluginInstall(); }}>
+				<label for="plugin-url">Install plugin from GitHub</label>
+				<div>
+					<input id="plugin-url" type="url" required placeholder="https://github.com/owner/repo/tree/main/plugin" bind:value={pluginUrl} />
+					<button type="submit" disabled={installingPlugin}>{installingPlugin ? 'Installing…' : 'Install'}</button>
+				</div>
+			</form>
 			{#each sources as source (source.slug)}
 				<SourceSettings {source} onChange={onSourceChange} />
 			{/each}
@@ -155,6 +234,33 @@
 				Credentials are stored in plain text in the local SQLite database. It is a
 				single-user machine-local app, but that is worth knowing before you paste a token
 				with broad scopes.
+			</p>
+		</section>
+
+		<section>
+			<h2>MCP server</h2>
+			<p class="dim note-top">
+				Exposes the timeline to any MCP client (Claude Code, Claude Desktop) as four tools —
+				<code>post_to_timeline</code>, <code>search_timeline</code>, <code>list_views</code> and
+				<code>get_view_posts</code> — so an agent can post to the stream and answer questions like
+				“what did I ship this week?” from your own activity.
+			</p>
+			<dl>
+				<dt>Claude Code</dt>
+				<dd>
+					<code class="cmd">claude mcp add dev-stream -- dev-stream mcp</code>
+					<button onclick={() => copy('claude mcp add dev-stream -- dev-stream mcp')}>Copy</button>
+				</dd>
+
+				<dt>Other clients</dt>
+				<dd>
+					<code class="cmd">dev-stream mcp</code>
+					<span class="dim">— a stdio server; point the client's command at this</span>
+				</dd>
+			</dl>
+			<p class="dim note">
+				The MCP server is a client of this same local API, so reads need the app running. Posting
+				still works while it's closed — those spool to disk and flush on next launch.
 			</p>
 		</section>
 
@@ -184,43 +290,46 @@
 	main {
 		flex: 1;
 		overflow-y: auto;
-		padding: 1.25rem;
-		max-width: 46rem;
+		padding: var(--space-xl);
+		width: min(100%, 62rem);
+		box-sizing: border-box;
+		margin-inline: auto;
 	}
+	.page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-lg); margin-bottom: 2rem; }
+	.page-head p { margin: var(--space-xs) 0 0; color: var(--fg-soft); font-size: 0.9rem; }
+	.local-badge { padding: var(--space-xs) var(--space-sm); border-radius: 999px; background: color-mix(in oklch, var(--success) 16%, var(--surface)); color: var(--success); font-size: 0.75rem; font-weight: 750; }
 
 	h1 {
-		font-family: var(--mono);
-		font-size: 1.1rem;
-		letter-spacing: -0.01em;
-		margin: 0 0 1.3rem;
+		font-size: 1.5rem;
+		letter-spacing: -0.025em;
+		margin: 0;
 	}
 	h2 {
-		font-family: var(--mono);
-		font-size: 0.68rem;
-		font-weight: 600;
-		text-transform: uppercase;
-		letter-spacing: 0.12em;
-		color: var(--fg-dim);
-		margin: 0 0 0.7rem;
-		padding-bottom: 0.4rem;
-		border-bottom: 1px solid var(--rail-soft);
+		font-size: 1rem;
+		font-weight: 750;
+		color: var(--fg);
+		margin: 0 0 var(--space-lg);
 	}
 
 	section {
-		margin-bottom: 1.9rem;
+		margin-bottom: var(--space-lg);
+		padding: var(--space-xl);
+		border: 1px solid var(--rail-soft);
+		border-radius: var(--radius-md);
+		background: var(--surface);
 	}
 
 	dl {
 		margin: 0;
 		display: grid;
 		grid-template-columns: 7rem 1fr;
-		gap: 0.6rem 1rem;
+		gap: var(--space-md) var(--space-lg);
 		align-items: baseline;
 	}
 	dt {
-		font-family: var(--mono);
-		color: var(--fg-dim);
-		font-size: 0.78rem;
+		color: var(--fg-soft);
+		font-size: 0.8rem;
+		font-weight: 650;
 	}
 	dd {
 		margin: 0;
@@ -228,7 +337,7 @@
 		align-items: center;
 		gap: 0.5rem;
 		flex-wrap: wrap;
-		font-size: 0.88rem;
+		font-size: 0.9rem;
 	}
 
 	code {
@@ -243,12 +352,19 @@
 	.token {
 		min-width: 18rem;
 	}
+	/* A command line: select-all on click so it's easy to grab even without the
+	   Copy button, and let it wrap rather than overflow the column. */
+	.cmd {
+		user-select: all;
+		white-space: pre-wrap;
+	}
 
 	button {
-		font-family: var(--mono);
-		font-size: 0.75rem;
-		padding: 0.28rem 0.6rem;
-		border-radius: 7px;
+		font-size: 0.78rem;
+		font-weight: 700;
+		min-height: 2.5rem;
+		padding: var(--space-sm) var(--space-md);
+		border-radius: var(--radius-sm);
 		border: 1px solid var(--rail);
 		background: var(--inset);
 		color: var(--fg-soft);
@@ -272,14 +388,33 @@
 		font-family: var(--mono);
 		font-size: 0.82rem;
 	}
+	.plugin-install { margin: var(--space-lg) 0; }
+	.plugin-install label { display: block; margin-bottom: var(--space-xs); color: var(--fg-soft); font-size: 0.8rem; font-weight: 650; }
+	.plugin-install div { display: flex; gap: var(--space-sm); }
+	.plugin-install input { flex: 1; min-width: 0; padding: var(--space-sm); border-radius: var(--radius-sm); border: 1px solid var(--rail); background: var(--inset); color: var(--fg); font-family: var(--mono); }
+	.plugin-install input:focus { outline: none; border-color: var(--live); }
 	input[type='number']:focus {
 		outline: none;
 		border-color: var(--live);
 	}
 
+	.toggle {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.45rem;
+		font-family: var(--mono);
+		font-size: 0.82rem;
+		color: var(--fg-soft);
+	}
+	input[type='checkbox'] {
+		accent-color: var(--live);
+		width: 0.95rem;
+		height: 0.95rem;
+	}
+
 	.dim {
-		color: var(--fg-dim);
-		font-size: 0.8rem;
+		color: var(--fg-soft);
+		font-size: 0.82rem;
 		line-height: 1.5;
 	}
 	.note {
@@ -314,5 +449,12 @@
 	.chip:hover {
 		border-color: var(--live);
 		color: var(--live-soft);
+	}
+	@media (max-width: 40rem) {
+		main { padding: var(--space-md); }
+		section { padding: var(--space-lg); }
+		dl { grid-template-columns: 1fr; gap: var(--space-sm); }
+		dd { margin-bottom: var(--space-md); }
+		.token { min-width: 0; max-width: 100%; }
 	}
 </style>

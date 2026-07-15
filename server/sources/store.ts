@@ -7,7 +7,7 @@
 import type { Db } from '../db.ts';
 import { ValidationError } from '../posts.ts';
 import type { SourceStatus, SourceWorker } from './types.ts';
-import { WORKERS } from './registry.ts';
+import { findWorker, getWorkers } from './registry.ts';
 
 interface SourceRow {
 	slug: string;
@@ -16,20 +16,35 @@ interface SourceRow {
 	enabled: number;
 	last_error: string | null;
 	last_polled_at: string | null;
+	trusted_hash: string | null;
 }
 
 export interface SourceState {
 	config: Record<string, unknown>;
 	cursor: string | null;
 	enabled: boolean;
+	/** The manifest hash the user trusted, or null. Meaningless for built-ins. */
+	trustedHash: string | null;
+}
+
+/**
+ * Built-ins are trusted by construction — they ARE the app. A plugin is
+ * trusted only while the stored grant matches its current manifest byte for
+ * byte, so a manifest edit (new host, new `run` grant) re-prompts.
+ */
+export function isTrusted(worker: SourceWorker, state: SourceState): boolean {
+	if (worker.origin !== 'plugin') return true;
+	return state.trustedHash !== null && state.trustedHash === worker.manifestHash;
 }
 
 export function getSourceState(db: Db, slug: string): SourceState {
 	const row = db
-		.prepare('SELECT slug, config, cursor, enabled, last_error, last_polled_at FROM sources WHERE slug = ?')
+		.prepare(
+			'SELECT slug, config, cursor, enabled, last_error, last_polled_at, trusted_hash FROM sources WHERE slug = ?'
+		)
 		.get(slug) as unknown as SourceRow | undefined;
 
-	if (!row) return { config: {}, cursor: null, enabled: false };
+	if (!row) return { config: {}, cursor: null, enabled: false, trustedHash: null };
 
 	let config: Record<string, unknown> = {};
 	try {
@@ -38,7 +53,12 @@ export function getSourceState(db: Db, slug: string): SourceState {
 		console.error(`[sources] ${slug} has unparseable config; treating it as empty`);
 	}
 
-	return { config, cursor: row.cursor, enabled: row.enabled === 1 };
+	return {
+		config,
+		cursor: row.cursor,
+		enabled: row.enabled === 1,
+		trustedHash: row.trusted_hash
+	};
 }
 
 function upsert(db: Db, slug: string, patch: Partial<SourceRow>): void {
@@ -69,7 +89,7 @@ export function saveSourceConfig(
 	slug: string,
 	input: unknown
 ): SourceStatus {
-	const worker = WORKERS.find((w) => w.slug === slug);
+	const worker = findWorker(slug);
 	if (!worker) throw new ValidationError(`unknown source: ${slug}`);
 
 	if (typeof input !== 'object' || input === null || Array.isArray(input)) {
@@ -101,12 +121,50 @@ export function saveSourceConfig(
 
 	const enabled = raw.enabled === undefined ? current.enabled : Boolean(raw.enabled);
 
+	// The trust gate. Config and credentials may be saved untrusted (typing a
+	// token is not running code), but nothing polls until the user has seen the
+	// manifest's permission list and said yes.
+	if (enabled && !isTrusted(worker, current)) {
+		throw new ValidationError(`${worker.label} must be trusted before it can be enabled`);
+	}
+
 	upsert(db, slug, {
 		config: JSON.stringify(config),
 		enabled: enabled ? 1 : 0,
 		// Re-enabling or re-keying a broken source should clear the old complaint.
 		last_error: null
 	});
+
+	return describeSource(db, worker);
+}
+
+/**
+ * Grants or revokes trust for a plugin.
+ *
+ * Granting stores the hash of the manifest AS IT IS RIGHT NOW — the exact
+ * permission list the user just read. Revoking also disables the source: an
+ * untrusted plugin must never be one background tick away from running.
+ */
+export function setSourceTrust(db: Db, slug: string, input: unknown): SourceStatus {
+	const worker = findWorker(slug);
+	if (!worker) throw new ValidationError(`unknown source: ${slug}`);
+	if (worker.origin !== 'plugin') {
+		throw new ValidationError(`${worker.label} is built in; trust does not apply`);
+	}
+
+	if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+		throw new ValidationError('body must be a JSON object');
+	}
+	const trusted = (input as Record<string, unknown>).trusted;
+	if (typeof trusted !== 'boolean') {
+		throw new ValidationError('trusted must be a boolean');
+	}
+
+	if (trusted) {
+		upsert(db, slug, { trusted_hash: worker.manifestHash ?? null });
+	} else {
+		upsert(db, slug, { trusted_hash: null, enabled: 0 });
+	}
 
 	return describeSource(db, worker);
 }
@@ -141,6 +199,11 @@ export function describeSource(db: Db, worker: SourceWorker): SourceStatus {
 	return {
 		slug: worker.slug,
 		label: worker.label,
+		origin: worker.origin ?? 'builtin',
+		trusted: isTrusted(worker, state),
+		// The permission list rides along so the settings page can show the user
+		// exactly what they would be (or have been) granting.
+		...(worker.permissions ? { permissions: worker.permissions } : {}),
 		enabled: state.enabled,
 		configured,
 		fields: worker.configFields,
@@ -152,5 +215,5 @@ export function describeSource(db: Db, worker: SourceWorker): SourceStatus {
 }
 
 export function listSources(db: Db): SourceStatus[] {
-	return WORKERS.map((worker) => describeSource(db, worker));
+	return getWorkers().map((worker) => describeSource(db, worker));
 }

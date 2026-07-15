@@ -10,8 +10,8 @@
 import type { Db } from '../db.ts';
 import type { Broadcaster } from '../events.ts';
 import { insertPosts, ValidationError } from '../posts.ts';
-import { WORKERS, findWorker } from './registry.ts';
-import { getSourceState, recordPoll } from './store.ts';
+import { findWorker, getWorkers } from './registry.ts';
+import { getSourceState, isTrusted, recordPoll } from './store.ts';
 import type { SourceWorker } from './types.ts';
 
 export interface Runner {
@@ -33,6 +33,16 @@ export function startSourceRunner(db: Db, broadcaster: Broadcaster): Runner {
 
 		try {
 			const state = getSourceState(db, worker.slug);
+
+			// Belt and braces: enabling already requires trust, and revoking trust
+			// disables — but a timer can already be live when trust is revoked, and
+			// "we never run untrusted code" should not depend on call ordering.
+			if (!isTrusted(worker, state)) {
+				const message = 'plugin is not trusted; grant trust in Settings to poll it';
+				recordPoll(db, worker.slug, state.cursor, message);
+				return { posts: 0, error: message };
+			}
+
 			const result = await worker.poll({ config: state.config, cursor: state.cursor });
 
 			let written = 0;
@@ -75,7 +85,7 @@ export function startSourceRunner(db: Db, broadcaster: Broadcaster): Runner {
 	}
 
 	function sync(): void {
-		for (const worker of WORKERS) {
+		for (const worker of getWorkers()) {
 			const { enabled } = getSourceState(db, worker.slug);
 			const running = timers.has(worker.slug);
 

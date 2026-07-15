@@ -11,6 +11,7 @@ import type {
 	ApiConfig,
 	Facets,
 	Post,
+	PostFilter,
 	PostInput,
 	PostPage,
 	PostQuery,
@@ -118,6 +119,29 @@ export function createPost(post: PostInput): Promise<Post> {
 	});
 }
 
+/** Marks a single post seen (clicked or keyboard-selected). Returns the synced post. */
+export function markPostSeen(id: string): Promise<Post> {
+	return request<Post>(`/api/posts/${encodeURIComponent(id)}/seen`, { method: 'POST' });
+}
+
+/** Clears a post's read marker, so it counts as unread again. */
+export function markPostUnseen(id: string): Promise<Post> {
+	return request<Post>(`/api/posts/${encodeURIComponent(id)}/unseen`, { method: 'POST' });
+}
+
+/**
+ * Marks every post matching `filter` as seen ("mark all as read"). Passing the
+ * timeline's active filter scopes it: clearing while a view is open clears only
+ * that view. Returns how many were newly marked.
+ */
+export function markAllSeen(filter: PostFilter = {}): Promise<{ marked: number }> {
+	return request(`/api/seen`, {
+		method: 'POST',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify(filter)
+	});
+}
+
 export async function fetchViews(): Promise<ViewWithUnread[]> {
 	const { views } = await request<{ views: ViewWithUnread[] }>('/api/views');
 	return views;
@@ -153,6 +177,14 @@ export async function fetchSources(): Promise<SourceStatus[]> {
 	return sources;
 }
 
+export function installPlugin(url: string): Promise<SourceStatus> {
+	return request<SourceStatus>('/api/plugins/install', {
+		method: 'POST',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify({ url })
+	});
+}
+
 /**
  * Saves an integration's enablement and config.
  *
@@ -172,6 +204,18 @@ export function saveSource(
 
 export function pollSource(slug: string): Promise<{ posts: number; error?: string }> {
 	return request(`/api/sources/${encodeURIComponent(slug)}/poll`, { method: 'POST' });
+}
+
+/**
+ * Grants or revokes a plugin's trust. Granting binds to the manifest the user
+ * just read; revoking also disables the source server-side.
+ */
+export function trustSource(slug: string, trusted: boolean): Promise<SourceStatus> {
+	return request<SourceStatus>(`/api/sources/${encodeURIComponent(slug)}/trust`, {
+		method: 'POST',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify({ trusted })
+	});
 }
 
 export function fetchSettings(): Promise<SettingsInfo> {

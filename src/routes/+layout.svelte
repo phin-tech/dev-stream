@@ -10,47 +10,49 @@
 </svelte:head>
 
 <nav>
-	<span class="brand"><span class="live-dot"></span>dev<span class="slash">/</span>stream</span>
-	<a href="/" class:current={page.url.pathname === '/'}>timeline</a>
-	<a href="/settings" class:current={page.url.pathname === '/settings'}>settings</a>
+	<span class="brand"><span class="brand-mark">d<span>/</span>s</span>dev-stream</span>
+	<div class="nav-links">
+		<a href="/" class:current={page.url.pathname === '/'}>Timeline</a>
+		<a href="/settings" class:current={page.url.pathname === '/settings'}>Settings</a>
+	</div>
+	<span class="connection"><span></span>Live</span>
 </nav>
 
 {@render children()}
 
 <style>
-	/* One dark theme — deliberately. This window sits alongside a terminal all day,
-	   so it reads as ink: a deep, cool blue-slate (not pure black) with a single
-	   warm signal colour. The feed is a live stream of machine events, so the design
-	   commits to two ideas: a *time-rail* (a literal chronological spine down the
-	   feed, git-log-graph vernacular) and *two voices* — a mono "machine voice" for
-	   timestamps, sources, kinds, tags and data, and a sans "human voice" for
-	   titles and prose. Amber is the one warm accent: live, now, unread, active. */
-	:global(:root) {
-		--ink: #0d0f14; /* app background */
-		--surface: #14161d; /* raised chrome */
-		--inset: #090a0e; /* wells: code, inputs */
-		--rail: #232a37; /* the time-rail + hairlines */
-		--rail-soft: #1a1f29; /* row dividers, hover */
-
-		--fg: #e7e9ee;
-		--fg-soft: #9aa0ad;
-		--fg-dim: #5f6672;
-
-		--live: #f6a935; /* the warm signal: live pulse, unread, active view */
-		--live-soft: #ffc266;
-		--alert: #ff6b5c;
-
-		/* Kept for source-hued badges; a few components still reference --accent. */
-		--accent: var(--live);
-		--accent-soft: var(--live-soft);
-
-		--mono: ui-monospace, 'SF Mono', SFMono-Regular, 'JetBrains Mono', Menlo, monospace;
-		--sans: ui-sans-serif, -apple-system, 'Inter', system-ui, sans-serif;
-
-		/* The time-rail geometry, shared by the feed and its cards. */
-		--gutter: 62px; /* width of the timestamp column left of the rail */
-		--node: 9px; /* the dot each post sits on */
-	}
+		:global(:root) {
+			--ink: oklch(0.14 0.025 255);
+			--surface: oklch(0.2 0.032 255);
+			--surface-raised: oklch(0.235 0.038 255);
+			--inset: oklch(0.115 0.024 255);
+			--rail: oklch(0.35 0.045 255);
+			--rail-soft: oklch(0.27 0.036 255);
+			--fg: oklch(0.96 0.012 255);
+			--fg-soft: oklch(0.78 0.025 255);
+			--fg-dim: oklch(0.63 0.035 255);
+			--live: oklch(0.72 0.18 255);
+			--live-soft: oklch(0.82 0.12 255);
+			--alert: oklch(0.7 0.2 28);
+			--success: oklch(0.78 0.19 142);
+			--violet: oklch(0.72 0.2 305);
+			--orange: oklch(0.78 0.17 65);
+			--cyan: oklch(0.79 0.14 195);
+			--accent: var(--live);
+			--accent-soft: var(--live-soft);
+			--mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, monospace;
+			--sans: ui-rounded, 'SF Pro Rounded', 'Avenir Next', system-ui, sans-serif;
+			--space-xs: 0.25rem;
+			--space-sm: 0.5rem;
+			--space-md: 0.75rem;
+			--space-lg: 1rem;
+			--space-xl: 1.5rem;
+			--radius-sm: 0.5rem;
+			--radius-md: 0.75rem;
+			--z-dropdown: 20;
+			--z-sticky: 30;
+			--ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+		}
 
 	:global(html),
 	:global(body) {
@@ -75,73 +77,66 @@
 	}
 
 	/* The window is the viewport; only the feed scrolls. */
-	:global(body) {
-		height: 100vh;
+		:global(body) {
+			height: 100vh;
 		overflow: hidden;
 		display: flex;
 		flex-direction: column;
 	}
 
-	nav {
+		nav {
 		display: flex;
 		align-items: center;
-		gap: 1.1rem;
-		padding: 0 1rem;
-		height: 46px;
+			gap: var(--space-xl);
+			padding: 0 var(--space-lg);
+			height: 3.5rem;
 		flex-shrink: 0;
 		border-bottom: 1px solid var(--rail);
-		background: linear-gradient(var(--surface), var(--ink));
-	}
+			background: var(--surface);
+		}
 
 	.brand {
 		display: flex;
 		align-items: center;
-		gap: 0.5rem;
-		font-family: var(--mono);
-		font-weight: 600;
-		font-size: 0.86rem;
-		letter-spacing: -0.01em;
-		margin-right: auto;
-	}
-	.slash {
-		color: var(--live);
-	}
-
-	/* A slow pulse on the brand mark: the stream is live. One animated thing. */
-	.live-dot {
-		width: 7px;
-		height: 7px;
-		border-radius: 50%;
-		background: var(--live);
-		animation: brand-pulse 2.4s ease-out infinite;
-	}
-	@keyframes brand-pulse {
-		0% {
-			box-shadow: 0 0 0 0 rgb(246 169 53 / 0.55);
+			gap: var(--space-sm);
+			font-weight: 700;
+			font-size: 0.95rem;
+			letter-spacing: -0.02em;
 		}
-		70% {
-			box-shadow: 0 0 0 6px rgb(246 169 53 / 0);
+		.brand-mark {
+			display: grid;
+			place-items: center;
+			width: 1.75rem;
+			height: 1.75rem;
+			border-radius: var(--radius-sm);
+			background: var(--live);
+			color: var(--ink);
+			font-family: var(--mono);
+			font-size: 0.72rem;
+			box-shadow: 0 4px 8px oklch(0.06 0.03 255 / 0.45);
 		}
-		100% {
-			box-shadow: 0 0 0 0 rgb(246 169 53 / 0);
+		.brand-mark span { color: var(--fg); }
+		.nav-links { display: flex; align-self: stretch; gap: var(--space-xs); margin-inline: auto; }
+		.connection { display: flex; align-items: center; gap: var(--space-sm); color: var(--fg-soft); font-size: 0.78rem; }
+		.connection span { width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--success); box-shadow: 0 0 0 3px color-mix(in oklch, var(--success) 18%, transparent); }
+		a {
+			display: flex;
+			align-items: center;
+			padding: 0 var(--space-md);
+			border-bottom: 2px solid transparent;
+			color: var(--fg-dim);
+			text-decoration: none;
+			font-size: 0.85rem;
+			font-weight: 650;
+			transition: color 160ms var(--ease-out), border-color 160ms var(--ease-out);
 		}
-	}
-	@media (prefers-reduced-motion: reduce) {
-		.live-dot {
-			animation: none;
+		a:hover {
+			color: var(--fg);
 		}
-	}
-
-	a {
-		color: var(--fg-dim);
-		text-decoration: none;
-		font-family: var(--mono);
-		font-size: 0.78rem;
-	}
-	a:hover {
-		color: var(--fg);
-	}
-	a.current {
-		color: var(--fg);
-	}
-</style>
+		a.current {
+			color: var(--fg);
+			border-bottom-color: var(--live);
+		}
+		@media (max-width: 38rem) { .brand { font-size: 0; } .brand-mark { font-size: 0.72rem; } .connection { display: none; } .nav-links { margin-left: auto; margin-right: 0; } }
+		@media (prefers-reduced-motion: reduce) { :global(*) { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
+	</style>

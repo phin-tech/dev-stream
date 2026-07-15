@@ -34,6 +34,9 @@ Thumbs.db
 
 # Local agent-tooling session state (instance locks, session json)
 /.juggler/
+/.codex/
+/.cursor/
+/.impeccable/
 
 # Vite
 vite.config.js.timestamp-*

@@ -131,26 +131,26 @@
 	.bar {
 		display: flex;
 		align-items: center;
-		gap: 0.4rem;
-		padding: 0.55rem 1rem;
+		gap: var(--space-sm);
+		padding: var(--space-md) var(--space-lg);
 		border-bottom: 1px solid var(--rail);
-		background: var(--ink);
+		background: color-mix(in oklch, var(--surface) 65%, var(--ink));
 		flex-wrap: wrap;
 	}
 
 	input[type='search'] {
 		flex: 1;
 		min-width: 12rem;
-		padding: 0.34rem 0.6rem;
-		border-radius: 7px;
+		min-height: 2.75rem;
+		padding: var(--space-sm) var(--space-md);
+		border-radius: var(--radius-sm);
 		border: 1px solid var(--rail);
 		background: var(--inset);
 		color: var(--fg);
-		font-family: var(--mono);
-		font-size: 0.8rem;
+		font-size: 0.88rem;
 	}
 	input[type='search']::placeholder {
-		color: var(--fg-dim);
+		color: var(--fg-soft);
 	}
 	input[type='search']:focus {
 		outline: none;
@@ -162,10 +162,11 @@
 	}
 
 	.trigger {
-		font-family: var(--mono);
-		font-size: 0.75rem;
-		padding: 0.34rem 0.6rem;
-		border-radius: 7px;
+		font-size: 0.78rem;
+		font-weight: 650;
+		min-height: 2.75rem;
+		padding: var(--space-sm) var(--space-md);
+		border-radius: var(--radius-sm);
 		border: 1px solid var(--rail);
 		background: var(--inset);
 		color: var(--fg-soft);
@@ -184,7 +185,7 @@
 		position: absolute;
 		top: calc(100% + 4px);
 		left: 0;
-		z-index: 10;
+		z-index: var(--z-dropdown);
 		min-width: 12rem;
 		max-height: 18rem;
 		overflow-y: auto;
@@ -192,7 +193,7 @@
 		border-radius: 8px;
 		border: 1px solid var(--rail);
 		background: var(--surface);
-		box-shadow: 0 8px 24px rgb(0 0 0 / 0.5);
+		box-shadow: 0 6px 8px oklch(0.06 0.03 255 / 0.55);
 	}
 
 	.menu label {
@@ -201,8 +202,7 @@
 		gap: 0.45rem;
 		padding: 0.28rem 0.4rem;
 		border-radius: 4px;
-		font-family: var(--mono);
-		font-size: 0.78rem;
+		font-size: 0.82rem;
 		cursor: pointer;
 	}
 	.menu label:hover {
@@ -225,10 +225,11 @@
 	}
 
 	.clear {
-		font-family: var(--mono);
-		font-size: 0.75rem;
-		padding: 0.34rem 0.6rem;
-		border-radius: 7px;
+		font-size: 0.78rem;
+		font-weight: 650;
+		min-height: 2.75rem;
+		padding: var(--space-sm) var(--space-md);
+		border-radius: var(--radius-sm);
 		border: 1px solid transparent;
 		background: transparent;
 		color: var(--fg-dim);
@@ -236,5 +237,9 @@
 	}
 	.clear:hover {
 		color: var(--fg);
+	}
+	@media (max-width: 46rem) {
+		.bar { padding-inline: var(--space-md); }
+		input[type='search'] { flex-basis: 100%; }
 	}
 </style>

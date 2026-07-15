@@ -97,6 +97,15 @@ export function fromFileUrl(url: string | URL): string {
 	return path;
 }
 
+/** `/a/b.txt` -> `file:///a/b.txt`. Inverse of `fromFileUrl`. */
+export function toFileUrl(path: string): URL {
+	const absolute = resolve(path);
+	const url = new URL('file:///');
+	// Encode via pathname assignment so spaces and friends survive the trip.
+	url.pathname = WINDOWS ? '/' + absolute.replace(/\\/g, '/') : absolute;
+	return url;
+}
+
 export function encodeHex(bytes: Uint8Array): string {
 	return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
 }
