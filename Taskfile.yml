@@ -1,0 +1,179 @@
+# https://taskfile.dev
+#
+# The front door for building, running and developing dev-stream.
+#
+# `deno task` is still the source of truth for anything that has to work inside a
+# compiled binary or CI without Task installed, so the targets here mostly wrap it
+# rather than duplicating flags. Where a target does more than one thing (build the
+# app AND the CLI, run two servers at once), it lives here — that is the part
+# `deno task` is bad at.
+
+version: '3'
+
+vars:
+  APP: out/dev-stream.app
+  CLI: out/dev-stream
+  # Deliberately not ~/.dev-stream: `task dev` should never scribble on the real
+  # timeline you are using while developing. Override to point at it if you want.
+  DEV_HOME: '{{.TASKFILE_DIR}}/.dev-stream-dev'
+
+tasks:
+  default:
+    desc: List the targets
+    silent: true
+    cmds:
+      - task --list
+
+  # --- setup ----------------------------------------------------------------
+
+  install:
+    desc: Install node deps (SvelteKit's toolchain) and cache Deno's
+    cmds:
+      - npm install
+      - deno cache main.ts cli/main.ts mcp/server.ts
+    sources:
+      - package.json
+      - package-lock.json
+      - deno.json
+      - deno.lock
+    generates:
+      - node_modules/.package-lock.json
+
+  # --- develop --------------------------------------------------------------
+
+  dev:
+    desc: Vite dev server + headless backend, with hot reload
+    deps: [install]
+    env:
+      DEV_STREAM_HOME: '{{.DEV_HOME}}'
+    cmds:
+      # The two halves of the app side by side: the real backend on 4517, and Vite
+      # serving the UI with HMR. The UI talks to the API exactly as the packaged app
+      # does — the only thing missing is the webview shell.
+      #
+      # Which is the wrinkle: no webview means no `bindings` global, so the page
+      # cannot ask for the API token the usual way. So we start the backend, wait
+      # for it to write its port/token, and hand them to Vite as env vars. See the
+      # matching dev-only branch in src/lib/api.ts. `.env.local` is gitignored — it
+      # holds a live token.
+      - |
+        set -e
+        deno task api &
+        API_PID=$!
+        trap 'kill $API_PID 2>/dev/null' EXIT
+
+        for _ in $(seq 1 60); do
+          [ -f "$DEV_STREAM_HOME/port" ] && break
+          sleep 0.25
+        done
+        if [ ! -f "$DEV_STREAM_HOME/port" ]; then
+          echo "backend never came up" >&2
+          exit 1
+        fi
+
+        printf 'VITE_DEV_STREAM_PORT=%s\nVITE_DEV_STREAM_TOKEN=%s\n' \
+          "$(cat "$DEV_STREAM_HOME/port")" "$(cat "$DEV_STREAM_HOME/token")" > .env.local
+
+        echo
+        echo "  UI   http://localhost:5173"
+        echo "  API  http://127.0.0.1:$(cat "$DEV_STREAM_HOME/port")   (DEV_STREAM_HOME=$DEV_STREAM_HOME)"
+        echo
+
+        npm run dev
+
+  api:
+    desc: The backend alone, headless — curl it without a window
+    deps: [install]
+    cmds:
+      - deno task api
+
+  desktop:
+    desc: Build the frontend and run the app in a real window
+    deps: [install]
+    cmds:
+      - deno task desktop
+
+  # --- verify ---------------------------------------------------------------
+
+  check:
+    desc: Typecheck everything (deno check + svelte-check)
+    deps: [install]
+    cmds:
+      - deno task check
+
+  test:
+    desc: Run the test suite
+    deps: [install]
+    cmds:
+      - deno task test server/ cli/
+
+  verify:
+    desc: What CI would run — typecheck, test, and prove the app still builds
+    cmds:
+      - task: check
+      - task: test
+      - task: build:app
+
+  # --- build ----------------------------------------------------------------
+
+  build:
+    desc: Build the app and the CLI
+    cmds:
+      - task: build:app
+      - task: build:cli
+
+  build:app:
+    desc: Build out/dev-stream.app
+    deps: [install]
+    cmds:
+      # deno desktop refuses to overwrite a bundle it doesn't recognise, which is
+      # exactly what a half-finished build from a failed run leaves behind.
+      - rm -rf {{.APP}}
+      - deno task build:app
+
+  build:cli:
+    desc: Build the out/dev-stream CLI binary
+    deps: [install]
+    cmds:
+      - deno task build:cli
+
+  build:all:
+    desc: Cross-compile the CLI for macOS, Linux and Windows
+    deps: [install]
+    cmds:
+      - deno task build:all
+      - ls -la out/dist
+
+  release:
+    desc: Signed .app with icon, plus every CLI binary
+    cmds:
+      - rm -rf {{.APP}}
+      - deno task build:app:release
+      - task: build:all
+
+  run:
+    desc: Launch the built app (builds it first if it isn't there)
+    cmds:
+      - task: build:app
+      - open {{.APP}}
+    status:
+      - test -d {{.APP}}
+
+  # --- housekeeping ---------------------------------------------------------
+
+  clean:
+    desc: Remove build output (not your timeline)
+    cmds:
+      - rm -rf out .svelte-kit .deno-deploy {{.DEV_HOME}}
+
+  clean:all:
+    desc: Also remove node_modules
+    cmds:
+      - task: clean
+      - rm -rf node_modules
+
+  nuke:
+    desc: "DESTRUCTIVE: delete your real ~/.dev-stream timeline, token and all"
+    prompt: This deletes ~/.dev-stream — every post you have ever made. Continue?
+    cmds:
+      - rm -rf ~/.dev-stream

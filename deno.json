@@ -1,0 +1,47 @@
+{
+  "nodeModulesDir": "manual",
+  "desktop": {
+    "app": {
+      "name": "dev-stream",
+      "identifier": "tech.phin.dev-stream",
+      "icons": {
+        "macos": "./assets/icon.icns",
+        "linux": "./assets/icon.png"
+      }
+    },
+    "output": {
+      "macos": "./out/dev-stream.app",
+      "linux": "./out/dev-stream",
+      "windows": "./out/dev-stream.exe"
+    }
+  },
+  "tasks": {
+    "api": "deno run --allow-net=127.0.0.1 --allow-read --allow-write --allow-env server/headless.ts",
+    "//check": "main.ts is deliberately absent: Deno.BrowserWindow only exists in the desktop lib, so plain `deno check` cannot see it. `deno desktop` typechecks the entrypoint itself at launch.",
+    "check": "deno check server/ cli/ mcp/ && npm run check",
+    "test": "deno test --allow-read --allow-write --allow-env --allow-net --allow-run=git",
+    "//permissions": "--allow-net is unscoped (not just 127.0.0.1) because the Phase 6 pollers call out to GitHub/Linear, and their API host is user-configurable (GitHub Enterprise, self-hosted). --allow-run is scoped to `open`: the openExternal/revealInFinder bindings, nothing else.",
+    "desktop": "npm run build && deno desktop --allow-env --allow-read --allow-write --allow-net --allow-run=open --include .deno-deploy --include server main.ts",
+    "build:app": "npm run build && deno desktop --allow-env --allow-read --allow-write --allow-net --allow-run=open --include .deno-deploy --include server --output out/dev-stream.app main.ts && codesign --force --sign - out/dev-stream.app",
+    "//build:app": "--include is required: main.ts dynamically loads .deno-deploy and server/. Permissions are baked in at compile time. The trailing codesign is NOT redundant: deno desktop 2.9.2 copies the icon into Contents/Resources AFTER signing, which invalidates the signature ('a sealed resource is missing or invalid').",
+    "cli": "deno run --allow-net=127.0.0.1 --allow-read --allow-write --allow-env --allow-run=git cli/main.ts",
+    "build:cli": "deno compile --allow-net=127.0.0.1 --allow-read --allow-write --allow-env --allow-run=git --output out/dev-stream cli/main.ts",
+    "build:app:release": "npm run build && deno desktop --allow-env --allow-read --allow-write --allow-net --allow-run=open --include .deno-deploy --include server --output out/dev-stream.app main.ts && codesign --force --sign - out/dev-stream.app && codesign --verify --verbose out/dev-stream.app",
+    "//build:all": "Cross-compile the CLI. The .app itself needs a macOS host (codesign + bundle), so the desktop matrix is macOS-only here.",
+    "build:all": "deno compile --allow-net=127.0.0.1 --allow-read --allow-write --allow-env --allow-run=git --target aarch64-apple-darwin  --output out/dist/dev-stream-macos-arm64 cli/main.ts && deno compile --allow-net=127.0.0.1 --allow-read --allow-write --allow-env --allow-run=git --target x86_64-apple-darwin   --output out/dist/dev-stream-macos-x64 cli/main.ts && deno compile --allow-net=127.0.0.1 --allow-read --allow-write --allow-env --allow-run=git --target x86_64-unknown-linux-gnu --output out/dist/dev-stream-linux-x64 cli/main.ts && deno compile --allow-net=127.0.0.1 --allow-read --allow-write --allow-env --allow-run=git --target aarch64-unknown-linux-gnu --output out/dist/dev-stream-linux-arm64 cli/main.ts && deno compile --allow-net=127.0.0.1 --allow-read --allow-write --allow-env --allow-run=git --target x86_64-pc-windows-msvc --output out/dist/dev-stream-windows-x64.exe cli/main.ts",
+    "//build:app:release": "--compress is deliberately absent: on Deno 2.9.2 it breaks codesign outright, and even after a manual deep sign the self-extracting stub cannot find its own inner binary. It would take the app from 156MB to 32MB, so revisit when deno desktop stabilises. Swap `-` for a Developer ID identity to distribute."
+  },
+  "imports": {
+    "@std/assert": "jsr:@std/assert@^1.0.15",
+    "@std/cli": "jsr:@std/cli@^1.0.32",
+    "@std/encoding": "jsr:@std/encoding@^1.0.11",
+    "@std/path": "jsr:@std/path@^1.1.6",
+    "@std/ulid": "jsr:@std/ulid@^1.0.0"
+  },
+  "exclude": [
+    "node_modules",
+    ".svelte-kit",
+    ".deno-deploy",
+    "out"
+  ]
+}
