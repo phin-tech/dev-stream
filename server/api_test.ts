@@ -13,7 +13,8 @@ const TOKEN = 'test-token';
  */
 function harness(
 	onFocusRequest?: () => void,
-	install?: (url: string) => Promise<SourceStatus>
+	install?: (url: string) => Promise<SourceStatus>,
+	openExternal?: (url: string) => Promise<void>
 ) {
 	const db = openDb(':memory:');
 	const broadcaster = new Broadcaster();
@@ -26,7 +27,8 @@ function harness(
 	};
 	const handle = createApiHandler({
 		db, broadcaster, token: TOKEN, info, dbPath: ':memory:', onFocusRequest,
-		plugins: install ? { install } : undefined
+		plugins: install ? { install } : undefined,
+		openExternal
 	});
 
 	const call = (method: string, path: string, body?: unknown, token: string | null = TOKEN) =>
@@ -43,6 +45,20 @@ function harness(
 
 	return { db, broadcaster, call };
 }
+
+Deno.test('external links are validated and delegated to the desktop shell', async () => {
+	const opened: string[] = [];
+	const { call } = harness(undefined, undefined, (url) => {
+		opened.push(url);
+		return Promise.resolve();
+	});
+
+	const response = await call('POST', '/api/open-external', { url: 'https://example.com/story?q=1' });
+	assertEquals(response.status, 200);
+	assertEquals(opened, ['https://example.com/story?q=1']);
+	assertEquals((await call('POST', '/api/open-external', { url: 'javascript:alert(1)' })).status, 400);
+	assertEquals(opened.length, 1);
+});
 
 Deno.test('installing a GitHub plugin delegates to the installer and returns the source', async () => {
 	const urls: string[] = [];

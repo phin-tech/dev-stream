@@ -251,7 +251,11 @@ export async function regenerateToken(): Promise<string> {
  * page with the target site, and there is no back button to return from it.
  */
 export async function openExternal(url: string): Promise<void> {
-	await callBinding('openExternal', [url]);
+	await request('/api/open-external', {
+		method: 'POST',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify({ url })
+	});
 }
 
 export async function revealInFinder(path: string): Promise<void> {

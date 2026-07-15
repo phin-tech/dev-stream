@@ -29,6 +29,8 @@ export interface ApiOptions {
 	dbPath: string;
 	/** Called when a second launch asks the running instance to come forward. */
 	onFocusRequest?: () => void;
+	/** Opens a validated external URL using the desktop shell. */
+	openExternal?: (url: string) => Promise<void>;
 	/** The integration poll loop, so settings changes take effect immediately. */
 	sources?: {
 		sync(): void;
@@ -308,6 +310,33 @@ export function createApiHandler(opts: ApiOptions): (req: Request) => Promise<Re
 				return json(await opts.plugins.install(url.trim()), 201);
 			} catch (err) {
 				return error(400, err instanceof Error ? err.message : String(err));
+			}
+		}
+
+		if (path === '/api/open-external' && req.method === 'POST') {
+			if (!opts.openExternal) return error(503, 'external URL opening is not available');
+			let body: unknown;
+			try {
+				body = await req.json();
+			} catch {
+				return error(400, 'body must be valid JSON');
+			}
+			const raw = typeof body === 'object' && body !== null ? (body as { url?: unknown }).url : undefined;
+			if (typeof raw !== 'string') return error(400, 'url is required');
+			let url: URL;
+			try {
+				url = new URL(raw);
+			} catch {
+				return error(400, 'url must be valid');
+			}
+			if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+				return error(400, 'only http and https URLs can be opened');
+			}
+			try {
+				await opts.openExternal(url.href);
+				return json({ opened: true });
+			} catch (err) {
+				return error(500, err instanceof Error ? err.message : String(err));
 			}
 		}
 

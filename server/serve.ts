@@ -38,6 +38,8 @@ export interface StartOptions {
 	dbFile?: string;
 	/** Invoked when a second launch asks us to raise the window. */
 	onFocusRequest?: () => void;
+	/** Desktop-shell action; absent in headless mode. */
+	openExternal?: (url: string) => Promise<void>;
 }
 
 export async function startBackend(opts: StartOptions = {}): Promise<Backend> {
@@ -85,6 +87,7 @@ export async function startBackend(opts: StartOptions = {}): Promise<Backend> {
 		info,
 		dbPath: dbFile,
 		onFocusRequest: opts.onFocusRequest,
+		openExternal: opts.openExternal,
 		sources,
 		plugins: {
 			async install(url) {
