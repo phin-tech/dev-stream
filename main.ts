@@ -205,7 +205,7 @@ diag('serve.ts imported; calling startBackend');
 const backend = await startBackend({
 	// A second launch POSTs /api/window/focus instead of opening a duplicate.
 	onFocusRequest: () => win.focus(),
-	async openExternal(url) {
+	async openExternal(url: string) {
 		const { success, stderr } = await new Deno.Command('open', { args: [url] }).output();
 		if (!success) throw new Error(new TextDecoder().decode(stderr) || 'macOS could not open the URL');
 	}
