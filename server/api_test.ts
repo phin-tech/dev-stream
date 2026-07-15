@@ -243,6 +243,7 @@ Deno.test('CORS preflight is answered', async () => {
 	assertEquals(res.status, 204);
 	assertEquals(res.headers.get('access-control-allow-origin'), '*');
 	assert(res.headers.get('access-control-allow-headers')?.includes('authorization'));
+	assert(res.headers.get('access-control-allow-methods')?.includes('PUT'));
 });
 
 Deno.test('a second launch can ask the running instance to focus', async () => {
