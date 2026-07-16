@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import FilterBar from '$lib/components/FilterBar.svelte';
 	import PostCard from '$lib/components/PostCard.svelte';
 	import QuickLook from '$lib/components/QuickLook.svelte';
@@ -11,6 +11,7 @@
 	import { activityArrivalMode, postLinks } from '$lib/timeline';
 	import { quickLookIntent } from '$lib/interaction-policy';
 	import type { PostFilter, ViewWithUnread } from '../shared/types';
+	import type { FilterDimension } from '$lib/filter-keyboard';
 
 	const feed = new Feed();
 
@@ -18,6 +19,8 @@
 	let sentinel = $state<HTMLElement | null>(null);
 	let atTop = $state(true);
 	let quickLookPostId = $state<string | null>(null);
+	let filterBar = $state<FilterBar | null>(null);
+	let returnFocusToTimeline = $state(false);
 	const arrivalMode = $derived(activityArrivalMode({ pendingCount: feed.pending.length, atTop }));
 
 	const mutedCount = $derived(
@@ -41,6 +44,13 @@
 
 	$effect(() => {
 		if (arrivalMode === 'inline') feed.applyPending();
+	});
+
+	$effect(() => {
+		if (!returnFocusToTimeline || feed.loading) return;
+		returnFocusToTimeline = false;
+		feed.selected = feed.posts.length ? 0 : -1;
+		void tick().then(() => scroller?.focus());
 	});
 
 	function trackScroll() {
@@ -164,6 +174,19 @@
 		document.querySelector<HTMLInputElement>("input[type='search']")?.focus();
 	}
 
+	function finishFilterInteraction() {
+		returnFocusToTimeline = true;
+	}
+
+	function openFilter(dimension: FilterDimension) {
+		void filterBar?.openPicker(dimension);
+	}
+
+	function clearFilters() {
+		filterBar?.clearAllFilters();
+		finishFilterInteraction();
+	}
+
 	function scrollToBottom() {
 		if (!scroller) return;
 		feed.selected = Math.max(0, feed.posts.length - 1);
@@ -224,7 +247,9 @@
 		toggleSidebar,
 		hasSelectedLink: () => selectedLink() !== null,
 		openSelectedLink,
-		toggleSelectedArchive
+		toggleSelectedArchive,
+		openFilter,
+		clearFilters
 	};
 
 	// Static timeline commands plus one per saved view (Cmd/Ctrl 1–9, 0), rebuilt
@@ -286,12 +311,14 @@
 	<section class="feed">
 		<div class="control-surface">
 			<FilterBar
+				bind:this={filterBar}
 				filter={feed.filter}
 				facets={feed.facets}
 				onChange={(filter) => {
 					feed.setFilter(filter);
 					scroller?.scrollTo({ top: 0 });
 				}}
+				onDone={finishFilterInteraction}
 			/>
 
 			{#if mutedCount > 0}
@@ -313,7 +340,7 @@
 			{/if}
 		</div>
 
-		<main bind:this={scroller} onscroll={trackScroll}>
+		<main bind:this={scroller} tabindex="-1" onscroll={trackScroll}>
 			{#if arrivalMode === 'indicator'}
 				<button class="pill" onclick={showNew}>
 					{feed.pending.length}

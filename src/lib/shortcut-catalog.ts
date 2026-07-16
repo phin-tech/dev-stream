@@ -20,6 +20,12 @@ export const shortcutTitles: Record<string, string> = {
   "toggle-sidebar": "Collapse or expand views",
   "open-primary-link": "Open selected post’s primary link",
   "toggle-archive": "Archive or restore selected post",
+  "filter-source": "Filter by source",
+  "filter-project": "Filter by project",
+  "filter-repo": "Filter by repository",
+  "filter-kind": "Filter by kind",
+  "filter-tag": "Filter by tag",
+  "clear-filters": "Clear all filters",
 };
 
 export const globalShortcutDefinitions: ShortcutDefinition[] = [
@@ -44,6 +50,12 @@ export const timelineShortcutDefinitions: ShortcutDefinition[] = [
   { id: "toggle-sidebar", bindings: ["mod+b", "z"], scope: "timeline" },
   { id: "open-primary-link", bindings: ["g l", "mod+enter"], scope: "timeline" },
   { id: "toggle-archive", bindings: ["a"], scope: "timeline" },
+  { id: "filter-source", bindings: ["f s"], scope: "timeline" },
+  { id: "filter-project", bindings: ["f p"], scope: "timeline" },
+  { id: "filter-repo", bindings: ["f r"], scope: "timeline" },
+  { id: "filter-kind", bindings: ["f k"], scope: "timeline" },
+  { id: "filter-tag", bindings: ["f t"], scope: "timeline" },
+  { id: "clear-filters", bindings: ["f c"], scope: "timeline" },
 ];
 
 export function viewShortcutDefinitions(views: ViewWithUnread[]): ShortcutDefinition[] {

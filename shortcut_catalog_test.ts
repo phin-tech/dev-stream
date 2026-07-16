@@ -34,6 +34,12 @@ Deno.test("the timeline catalog includes the complete safe Vim navigation set", 
   assertEquals(bindings["show-new"], ["."]);
   assertEquals(bindings["toggle-sidebar"], ["mod+b", "z"]);
   assertEquals(bindings["toggle-archive"], ["a"]);
+  assertEquals(bindings["filter-source"], ["f s"]);
+  assertEquals(bindings["filter-project"], ["f p"]);
+  assertEquals(bindings["filter-repo"], ["f r"]);
+  assertEquals(bindings["filter-kind"], ["f k"]);
+  assertEquals(bindings["filter-tag"], ["f t"]);
+  assertEquals(bindings["clear-filters"], ["f c"]);
 });
 
 Deno.test("saved views use Command 1 through 9 and never assign a destructive command", () => {

@@ -1,16 +1,22 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import type { Facets, PostFilter } from '../../shared/types';
+	import {
+		nextFilterOptionIndex,
+		typeaheadFilterOptionIndex,
+		type FilterDimension
+	} from '../filter-keyboard';
 
 	interface Props {
 		filter: PostFilter;
 		facets: Facets;
 		onChange: (filter: PostFilter) => void;
+		onDone: () => void;
 	}
 
-	let { filter, facets, onChange }: Props = $props();
+	let { filter, facets, onChange, onDone }: Props = $props();
 
-	type Dimension = 'source' | 'project' | 'repo' | 'kind' | 'tag';
+	type Dimension = FilterDimension;
 
 	const DIMENSIONS: { key: Dimension; label: string }[] = [
 		{ key: 'source', label: 'Source' },
@@ -21,6 +27,9 @@
 	];
 
 	let open = $state<Dimension | null>(null);
+	let bar = $state<HTMLElement | null>(null);
+	let typeahead = '';
+	let typeaheadTimer: ReturnType<typeof setTimeout> | undefined;
 
 	// The search box is debounced, so it owns its own text while the user types --
 	// binding it straight to filter.q would fire a query per keystroke.
@@ -64,6 +73,33 @@
 		}, 200);
 	}
 
+	function commitSearch() {
+		clearTimeout(debounce);
+		const q = search.trim() || undefined;
+		lastPushed = q;
+		onChange({ ...filter, q });
+	}
+
+	function handleSearchKeydown(event: KeyboardEvent) {
+		if (event.key === 'Enter') {
+			event.preventDefault();
+			event.stopPropagation();
+			commitSearch();
+			onDone();
+		} else if (event.key === 'Escape') {
+			event.preventDefault();
+			event.stopPropagation();
+			clearTimeout(debounce);
+			if (search) {
+				search = '';
+				lastPushed = undefined;
+				onChange({ ...filter, q: undefined });
+			} else {
+				onDone();
+			}
+		}
+	}
+
 	function clearAll() {
 		clearTimeout(debounce);
 		search = '';
@@ -71,12 +107,74 @@
 		onChange({});
 		open = null;
 	}
+
+	export async function openPicker(dimension: FilterDimension) {
+		const trigger = bar?.querySelector<HTMLButtonElement>(`button[data-dimension="${dimension}"]`);
+		if (!trigger || trigger.disabled) return;
+		open = dimension;
+		await tick();
+		trigger.closest('.picker')?.querySelector<HTMLInputElement>('.menu input[type="checkbox"]')?.focus();
+	}
+
+	export function clearAllFilters() {
+		clearAll();
+	}
+
+	function handleMenuKeydown(event: KeyboardEvent, dimension: Dimension) {
+		const menu = event.currentTarget as HTMLElement;
+		const options = [...menu.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')];
+		const current = options.indexOf(event.target as HTMLInputElement);
+		let next = -1;
+
+		if (event.key === 'ArrowDown' || event.key === 'j') {
+			next = nextFilterOptionIndex(current, 1, options.length);
+		} else if (event.key === 'ArrowUp' || event.key === 'k') {
+			next = nextFilterOptionIndex(current, -1, options.length);
+		} else if (event.key === 'Home') {
+			next = options.length ? 0 : -1;
+		} else if (event.key === 'End') {
+			next = options.length - 1;
+		} else if (event.key === 'Escape') {
+			event.preventDefault();
+			event.stopPropagation();
+			open = null;
+			bar?.querySelector<HTMLButtonElement>(`button[data-dimension="${dimension}"]`)?.focus();
+			return;
+		} else if (event.key === 'Enter') {
+			event.preventDefault();
+			event.stopPropagation();
+			open = null;
+			onDone();
+			return;
+		} else if (
+			event.key.length === 1 &&
+			event.key !== ' ' &&
+			!event.metaKey &&
+			!event.ctrlKey &&
+			!event.altKey
+		) {
+			typeahead += event.key.toLocaleLowerCase();
+			clearTimeout(typeaheadTimer);
+			typeaheadTimer = setTimeout(() => (typeahead = ''), 600);
+			const values = options.map((option) => option.getAttribute('aria-label') ?? '');
+			next = typeaheadFilterOptionIndex(values, current, typeahead);
+			if (next < 0 && typeahead.length > 1) {
+				typeahead = event.key.toLocaleLowerCase();
+				next = typeaheadFilterOptionIndex(values, current, typeahead);
+			}
+		}
+
+		if (next < 0) return;
+		event.preventDefault();
+		event.stopPropagation();
+		options[next]?.focus();
+	}
 </script>
 
 <!-- Clicking anywhere else closes an open dropdown. -->
 <svelte:window onclick={() => (open = null)} />
 
-<div class="bar">
+<div class="bar" bind:this={bar}>
 	<input
 		type="search"
 		placeholder="Search the timeline…"
@@ -84,6 +182,7 @@
 		title="Search — ⌘F or /"
 		bind:value={search}
 		oninput={onSearchInput}
+		onkeydown={handleSearchKeydown}
 	/>
 
 	{#each DIMENSIONS as dimension (dimension.key)}
@@ -93,7 +192,11 @@
 			<button
 				class="trigger"
 				class:active={selected.length > 0}
+				data-dimension={dimension.key}
 				disabled={values.length === 0}
+				aria-haspopup="menu"
+				aria-expanded={open === dimension.key}
+				aria-controls="filter-{dimension.key}-menu"
 				onclick={(e) => {
 					e.stopPropagation();
 					open = open === dimension.key ? null : dimension.key;
@@ -104,12 +207,20 @@
 
 			{#if open === dimension.key}
 				<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-				<div class="menu" onclick={(e) => e.stopPropagation()}>
+				<div
+					class="menu"
+					id="filter-{dimension.key}-menu"
+					role="menu"
+					tabindex="-1"
+					onclick={(e) => e.stopPropagation()}
+					onkeydown={(event) => handleMenuKeydown(event, dimension.key)}
+				>
 					{#each values as facet (facet.value)}
 						<label>
 							<input
 								type="checkbox"
 								checked={selected.includes(facet.value)}
+								aria-label={facet.value}
 								onchange={() => toggle(dimension.key, facet.value)}
 							/>
 							<span class="value">{facet.value}</span>

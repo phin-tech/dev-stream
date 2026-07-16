@@ -74,6 +74,9 @@ the application commands.
 | Timeline | `⌘0` | |
 | Toggle views sidebar | `⌘B` | `z` |
 | Focus search | `⌘F` | `/` |
+| Open Source / Project / Repo filter | | `f s` / `f p` / `f r` |
+| Open Kind / Tag filter | | `f k` / `f t` |
+| Clear all filters | | `f c` |
 | Select next / previous | `↓` / `↑` | `j` / `k` |
 | Jump to first / last | `⌘↑` / `⌘↓` | `g g` / `G` |
 | Move half a page | `⌃D` / `⌃U` | |
@@ -86,6 +89,10 @@ the application commands.
 
 Quick Look is temporary: press `Space` or `Esc` to dismiss it. `Return`
 opens the selected post's persistent details.
+
+Inside a filter, use `j`/`k` or the arrow keys to move, `Space` to toggle
+multiple values, type to jump to a value, `Return` to finish, and `Esc` to close.
+Pressing `Return` in search applies the query and returns focus to the first result.
 
 ## CLI
 

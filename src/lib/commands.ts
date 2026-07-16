@@ -15,6 +15,7 @@ import { tick } from "svelte";
 import type { Feed } from "./feed.svelte";
 import type { ViewWithUnread } from "../shared/types";
 import { selectionRevealMode } from "./timeline";
+import type { FilterDimension } from "./filter-keyboard";
 import {
   advanceShortcut,
   initialShortcutState,
@@ -41,6 +42,8 @@ export interface CommandContext {
   hasSelectedLink(): boolean;
   openSelectedLink(): void;
   toggleSelectedArchive(): void;
+  openFilter(dimension: FilterDimension): void;
+  clearFilters(): void;
 }
 
 export interface Command extends ShortcutDefinition {
@@ -261,6 +264,49 @@ export const NAV_COMMANDS: Command[] = [
     scope: "timeline",
     enabled: (ctx) => ctx.feed.selected >= 0,
     run: (ctx) => ctx.toggleSelectedArchive(),
+  },
+  {
+    id: "filter-source",
+    title: "Filter by source",
+    bindings: ["f s"],
+    scope: "timeline",
+    run: (ctx) => ctx.openFilter("source"),
+  },
+  {
+    id: "filter-project",
+    title: "Filter by project",
+    bindings: ["f p"],
+    scope: "timeline",
+    run: (ctx) => ctx.openFilter("project"),
+  },
+  {
+    id: "filter-repo",
+    title: "Filter by repository",
+    bindings: ["f r"],
+    scope: "timeline",
+    run: (ctx) => ctx.openFilter("repo"),
+  },
+  {
+    id: "filter-kind",
+    title: "Filter by kind",
+    bindings: ["f k"],
+    scope: "timeline",
+    run: (ctx) => ctx.openFilter("kind"),
+  },
+  {
+    id: "filter-tag",
+    title: "Filter by tag",
+    bindings: ["f t"],
+    scope: "timeline",
+    run: (ctx) => ctx.openFilter("tag"),
+  },
+  {
+    id: "clear-filters",
+    title: "Clear all filters",
+    bindings: ["f c"],
+    scope: "timeline",
+    enabled: (ctx) => Object.keys(ctx.feed.filter).length > 0,
+    run: (ctx) => ctx.clearFilters(),
   },
   {
     id: "open-timeline",

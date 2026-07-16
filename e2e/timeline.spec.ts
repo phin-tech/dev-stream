@@ -281,6 +281,48 @@ test('timeline Vim commands select posts, protect text entry, and focus search',
 	await expect(search).toHaveValue('jk');
 });
 
+test('filter chains drive picker selection and return focus to the timeline', async ({ page }) => {
+	await postFixture({ source: 'agent', title: 'Agent filter target', tags: ['keyboard'] });
+	await postFixture({ source: 'ci', title: 'CI filter target', tags: ['build'] });
+	await page.goto('/');
+	await expect(page.getByRole('heading', { name: 'CI filter target' })).toBeVisible();
+
+	await page.keyboard.press('f');
+	await page.keyboard.press('s');
+	const sourceTrigger = page.getByRole('button', { name: 'Source' });
+	await expect(sourceTrigger).toHaveAttribute('aria-expanded', 'true');
+	const agent = page.getByRole('checkbox', { name: 'agent' });
+	const ci = page.getByRole('checkbox', { name: 'ci' });
+	await expect(agent).toBeFocused();
+	await page.keyboard.press('j');
+	await expect(ci).toBeFocused();
+	await page.keyboard.press('Space');
+	await expect(ci).toBeChecked();
+	await page.keyboard.press('Enter');
+	await expect(sourceTrigger).toHaveAttribute('aria-expanded', 'false');
+	await expect(page.getByRole('main')).toBeFocused();
+	await expect(page.getByRole('heading', { name: 'Agent filter target' })).toBeHidden();
+
+	await page.keyboard.press('f');
+	await page.keyboard.press('c');
+	await expect(page.getByRole('heading', { name: 'Agent filter target' })).toBeVisible();
+});
+
+test('search Enter hands focus back to the first matching timeline item', async ({ page }) => {
+	await postFixture({ source: 'agent', title: 'Unique searchable activity' });
+	await postFixture({ source: 'ci', title: 'Unrelated activity' });
+	await page.goto('/');
+	await expect(page.getByRole('heading', { name: 'Unrelated activity' })).toBeVisible();
+
+	await page.keyboard.press('/');
+	const search = page.getByRole('searchbox', { name: 'Search the timeline…' });
+	await page.keyboard.type('Unique searchable');
+	await page.keyboard.press('Enter');
+	await expect(page.getByRole('main')).toBeFocused();
+	await expect(page.locator('article.selected')).toHaveCount(1);
+	await expect(page.getByRole('heading', { name: 'Unique searchable activity' })).toBeVisible();
+});
+
 test('Space previews a selected post while Enter opens persistent details', async ({ page }) => {
 	await postFixture({
 		source: 'keyboard',
