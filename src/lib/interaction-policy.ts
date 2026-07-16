@@ -14,3 +14,13 @@ export function escapeIntent(input: {
   if (input.hasFilter) return "reset-filter";
   return "none";
 }
+
+export type QuickLookIntent = "open" | "close" | "none";
+
+export function quickLookIntent(input: {
+  hasSelection: boolean;
+  quickLookOpen: boolean;
+}): QuickLookIntent {
+  if (input.quickLookOpen) return "close";
+  return input.hasSelection ? "open" : "none";
+}

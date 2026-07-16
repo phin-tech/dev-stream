@@ -232,6 +232,20 @@ Deno.test('a post can be marked seen, unread again, and 404s an unknown id', asy
 	assertEquals((await call('POST', '/api/posts/nope/seen')).status, 404);
 });
 
+Deno.test('a post can be archived and restored through the API', async () => {
+	const { call } = harness();
+	const created = (await (await call('POST', '/api/posts', { source: 'agent', title: 'done' })).json()) as Post;
+
+	assertEquals((await call('POST', `/api/posts/${created.id}/archive`)).status, 200);
+	assertEquals(((await (await call('GET', '/api/posts')).json()) as PostPage).posts.length, 0);
+	const archived = ((await (await call('GET', '/api/posts?archived=true')).json()) as PostPage).posts;
+	assertEquals(archived[0].archived, true);
+
+	assertEquals((await call('POST', `/api/posts/${created.id}/restore`)).status, 200);
+	assertEquals(((await (await call('GET', '/api/posts')).json()) as PostPage).posts[0].id, created.id);
+	assertEquals((await call('POST', '/api/posts/nope/archive')).status, 404);
+});
+
 Deno.test('mark-all-seen clears the filtered set and reports the count', async () => {
 	const { call } = harness();
 	await call('POST', '/api/posts', [

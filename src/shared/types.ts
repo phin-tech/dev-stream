@@ -69,6 +69,8 @@ export interface Post {
    * back from the timeline; absent (and treated as unseen) on a freshly written one.
    */
   seen?: boolean;
+  /** Whether the reader has removed this post from the active timeline. */
+  archived?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -102,6 +104,8 @@ export interface PostFilter {
   /** Inclusive ISO-8601 bounds. */
   since?: string;
   until?: string;
+  /** Built-in Archive view. False/absent is the active timeline. */
+  archived?: boolean;
 }
 
 export interface PostQuery extends PostFilter {

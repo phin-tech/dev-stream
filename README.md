@@ -1,196 +1,143 @@
 # dev-stream
 
-A local-first desktop app that is a **Twitter feed for your own machine**. Tools,
-agents, CLIs and integrations post events to a timeline you can scroll, filter, and
-save views over.
+A local-first desktop activity timeline for your machine.
 
-Claude Code edits a file, CI fails a deploy, a PR gets merged, a Linear issue moves
-— they all land in one scrollable feed, live.
+Agents, CLIs, hooks, CI jobs, GitHub, Linear, and anything that can make an HTTP
+request can post into one searchable feed. Events arrive live, stay on your
+computer, and can be filtered, saved, read, archived, or opened without changing
+tools.
 
-Everything writes through **one localhost HTTP API**. There is no plugin system,
-because there doesn't need to be one: if a thing can `curl`, it can post to your
-timeline.
+## What it does
 
+- Collects local development activity in a live desktop timeline.
+- Searches post titles, bodies, and tags with SQLite FTS5.
+- Filters by source, project, repository, kind, and tag.
+- Saves filters as views with independent unread counts.
+- Archives posts without deleting them.
+- Supports macOS and Vim-style keyboard navigation.
+- Accepts events through a CLI, localhost API, Claude Code hooks, MCP, and
+  sandboxed source plugins.
+- Spools posts while the app is offline and drains them on the next launch.
+
+## Architecture
+
+```text
+Claude hooks ─┐
+CLI / curl ───┼── localhost HTTP + token ──► ingestion API ──► SQLite
+MCP clients ──┘                                  │                │
+                                                │ SSE            │
+Source plugins ── permission-scoped workers ────┘                ▼
+                                                        SvelteKit timeline
+                                                        in a native webview
 ```
-                                ┌──────────────────────────────────┐
-  claude hooks ──┐              │  dev-stream.app (deno desktop)   │
-  dev-stream CLI ┼─ HTTP/token ─┼─► Ingest API  ──► SQLite (posts) │
-  curl / anything┘              │  (localhost:4517) │              │
-                                │       SSE ◄───────┘              │
-  MCP clients ── stdio ── MCP   │        ▼                         │
-  (claude, etc.)  server ──HTTP─┤  SvelteKit UI in webview         │
-                                │  (timeline, filters, views)      │
-  source plugins ── sandboxed ──┤  permission-scoped workers      │
-                                └──────────────────────────────────┘
-```
 
-Built on Deno 2.9's `deno desktop` (native webview, single-binary compile) with a
-SvelteKit frontend. TypeScript end to end.
+The desktop app and CLI are TypeScript end to end. The backend runs on Deno,
+the interface is SvelteKit, and the desktop shell uses Deno's native webview.
 
----
+## Install from source
 
-## Quick start
+Requirements:
 
-Requires **Deno ≥ 2.9** and **Node** (for the SvelteKit build only).
-[Task](https://taskfile.dev) is optional but assumed below.
+- macOS
+- Deno 2.9 or newer
+- Node.js
 
 ```sh
 npm install
-task build          # → out/dev-stream.app and out/dev-stream (the CLI)
-task run            # launch it
+deno task install
 ```
 
-Put `out/dev-stream` on your PATH, then post something:
+This installs:
+
+- `~/.local/bin/dev-stream`
+- `~/Applications/dev-stream.app`
+
+Open the app, then post an event:
 
 ```sh
-dev-stream post "Shipped v1" --tag release
+dev-stream post "Shipped archive support" --kind note --tag release
 ```
 
-It appears in the window immediately. To stream your Claude Code sessions into it:
+If the app is not running, the CLI writes to `~/.dev-stream/spool/`. The app
+drains that queue on launch using the events' original timestamps.
 
-```sh
-cd ~/some/repo
-dev-stream init claude       # writes .claude/settings.json hooks
-```
+## Keyboard
 
-If the app isn't running, posts are **spooled** to `~/.dev-stream/spool/` and drain
-on next launch. A hook never blocks and never loses an event.
+The Help tab and command palette are generated from the same shortcut catalog as
+the application commands.
 
----
+| Action | macOS | Vim-style |
+| --- | --- | --- |
+| Command palette | `⌘K` | `:` |
+| Shortcut reference | `⌘/` | `?` |
+| Settings | `⌘,` | |
+| Timeline | `⌘0` | |
+| Toggle views sidebar | `⌘B` | `z` |
+| Focus search | `⌘F` | `/` |
+| Select next / previous | `↓` / `↑` | `j` / `k` |
+| Jump to first / last | `⌘↑` / `⌘↓` | `g g` / `G` |
+| Move half a page | `⌃D` / `⌃U` | |
+| Quick Look | `Space` | |
+| Open persistent details | `Return` | `o` |
+| Open primary link | `⌘Return` | `g l` |
+| Mark read or unread | | `m` |
+| Archive or restore | | `a` |
+| Show newer posts | | `.` |
 
-## The HTTP API
-
-The app writes two files on first run, and that is the entire discovery protocol:
-
-| File                  | Contents                                  |
-| --------------------- | ----------------------------------------- |
-| `~/.dev-stream/port`  | The port it actually bound (4517 if free) |
-| `~/.dev-stream/token` | A bearer token (mode `0600`)              |
-
-Bound to `127.0.0.1` only. Every route except `/api/health` needs
-`Authorization: Bearer <token>`.
-
-```sh
-TOKEN=$(cat ~/.dev-stream/token)
-PORT=$(cat ~/.dev-stream/port)
-API=http://127.0.0.1:$PORT
-```
-
-### Post
-
-`POST /api/posts` takes a single object, a bare array, or `{"posts": [...]}`.
-A batch is atomic: one bad post rejects the whole thing, so retrying can't duplicate.
-
-```sh
-curl -X POST $API/api/posts -H "Authorization: Bearer $TOKEN" \
-  -H 'content-type: application/json' -d '{
-    "source": "ci",
-    "kind":   "alert",
-    "title":  "Deploy failed on main",
-    "body":   "Step **build** exited with `1`.",
-    "tags":   ["deploy", "failed"],
-    "meta":   { "project": "dev-stream",
-                "repo":    "phin-tech/dev-stream",
-                "url":     "https://github.com/..." },
-    "dedupe_key": "build-1234"
-  }'
-```
-
-| Field        | Required | Notes                                                              |
-| ------------ | -------- | ------------------------------------------------------------------ |
-| `source`     | yes      | Free-form origin slug (`ci`, `claude-code`, anything).             |
-| `title`      | yes      | The card headline.                                                 |
-| `ts`         |          | ISO-8601. Server-assigned if absent. Normalized to UTC.            |
-| `kind`       |          | `event` (default) \| `note` \| `alert` \| `pr` \| `issue` \| …     |
-| `body`       |          | Markdown. Sanitized at render.                                     |
-| `tags`       |          | Lowercased, `#` stripped, deduped.                                 |
-| `meta`       |          | Open-ended. `project` and `repo` become indexed columns.           |
-| `dedupe_key` |          | Re-posting the same key within **10 minutes** *updates* that card. |
-
-`dedupe_key` is what makes a poller idempotent: a build reporting every 60s mutates
-one card instead of appending a hundred.
-
-### Query
-
-`GET /api/posts` — newest first, cursor-paginated.
-
-```sh
-curl -H "Authorization: Bearer $TOKEN" \
-  "$API/api/posts?source=ci&tag=deploy&q=failed&limit=50"
-```
-
-| Param                            | Notes                                              |
-| -------------------------------- | -------------------------------------------------- |
-| `source` `project` `repo` `kind` | Repeatable, or comma-separated. OR within a param. |
-| `tag`                            | Repeatable. **AND** — a post must carry every tag. |
-| `q`                              | Full-text (FTS5) over title, body and tags.        |
-| `since` / `until`                | ISO-8601, inclusive.                               |
-| `limit`                          | Default 50, max 200.                               |
-| `cursor`                         | Opaque; from the previous page's `next_cursor`.    |
-
-Different params AND together. Pagination is keyset, not `OFFSET`, because the feed
-has a live head — it stays correct (and flat, ~0.6 ms) while new posts arrive
-mid-scroll.
-
-### Everything else
-
-| Route                                                                        | Purpose                                       |
-| ---------------------------------------------------------------------------- | --------------------------------------------- |
-| `GET /api/health`                                                            | Unauthenticated. Discovery + liveness.        |
-| `GET /api/events`                                                            | SSE. New posts, live. (`?token=` allowed — `EventSource` can't set headers.) |
-| `GET /api/posts/:id`                                                         | One post.                                     |
-| `GET /api/facets`                                                            | Filter-bar values + counts. Same params as `/api/posts`. |
-| `GET`·`POST /api/views`                                                      | Saved views. `PATCH`/`DELETE /api/views/:id`. |
-| `POST /api/views/:id/seen`                                                   | Advance the unread marker.                    |
-| `GET`·`PUT /api/settings`                                                    | Retention, mutes.                             |
-| `GET /api/sources`, `PUT /api/sources/:slug`, `POST /api/sources/:slug/poll` | Integrations.                                 |
-| `POST /api/token/regenerate`                                                 | Rotate the bearer token.                      |
-
----
+Quick Look is temporary: press `Space` or `Esc` to dismiss it. `Return`
+opens the selected post's persistent details.
 
 ## CLI
 
 ```sh
-dev-stream post "Deployed to prod" --tag deploy --kind note
-npm test 2>&1 | dev-stream post --source ci --title "Test run"
-echo '{"source":"x","title":"raw"}' | dev-stream post --json
+# Simple post
+dev-stream post "Deployed to production" --source ci --kind event --tag deploy
 
-dev-stream tail                 # follow the timeline live
-dev-stream status               # is the app running, and where?
-dev-stream init claude          # install Claude Code hooks
-dev-stream mcp                  # run as an MCP server (stdio)
+# Markdown body from a command
+npm test 2>&1 | dev-stream post --source ci --title "Test run"
+
+# Raw post or batch from stdin
+echo '{"source":"release","title":"Version 0.2 shipped"}' | dev-stream post --json
+
+# Follow the live timeline
+dev-stream tail
+
+# Check local app discovery
+dev-stream status
+
+# Install Claude Code hooks
+dev-stream init claude
+
+# Run the MCP server over stdio
+dev-stream mcp
 ```
 
-`--project` and `--repo` default to the git repo directory name and the `origin`
-remote, so hooks and pipes carry context without anyone typing it.
-
----
+`--project` and `--repo` default to the current Git repository when possible.
+Use `--dedupe-key` for repeated status updates that should update one post
+instead of producing duplicates.
 
 ## Claude Code
 
 ```sh
-dev-stream init claude            # this project
-dev-stream init claude --global   # every project
+dev-stream init claude
+dev-stream init claude --global
 ```
 
-That merges hooks into `.claude/settings.json` (preserving anything already there;
-re-running updates rather than duplicating). Each shells out to `dev-stream hook`,
-which reads Claude's JSON payload on stdin and turns it into a post:
+The installer merges hooks into the existing Claude Code settings rather than
+overwriting them. Re-running it updates dev-stream's entries without duplication.
 
-| Event          | Becomes                                                                  |
-| -------------- | ------------------------------------------------------------------------ |
-| `PostToolUse`  | "Edited server/posts.ts", "Ran: npm test" (+ output). Failures → `alert`. |
-| `Stop`         | The reply's first line as the title, the rest as the body.               |
-| `Notification` | An `alert`, deduped per session so a waiting prompt doesn't spam.        |
-| `SessionStart` | "Claude session started".                                                |
+Useful events become timeline posts:
 
-Matched on `Edit|MultiEdit|Write|NotebookEdit|Bash|Task` — deliberately **not**
-`Read`/`Grep`/`Glob`, which fire constantly and say nothing about what changed.
+| Claude event | Timeline result |
+| --- | --- |
+| File edit | A concise edit card |
+| Shell command | Command and output |
+| Failed tool call | Alert |
+| Session stop | Reply title and body |
+| Notification | Deduplicated alert |
 
-`dev-stream hook` always exits 0. A hook that failed loudly would interrupt your
-Claude session over a timeline post, which is never the right trade.
-
----
+Read-only tool noise is intentionally ignored. Hook delivery always exits
+successfully so a timeline failure cannot block an agent session.
 
 ## MCP
 
@@ -198,97 +145,123 @@ Claude session over a timeline post, which is never the right trade.
 claude mcp add dev-stream -- dev-stream mcp
 ```
 
-Gives any MCP client four tools: `post_to_timeline`, `search_timeline`,
-`list_views`, `get_view_posts`. Now you can ask *"what did I ship this week?"* or
-*"what broke in dev-stream today?"* and have it answered from your own activity.
+The MCP server exposes tools to post, search, list saved views, and fetch view
+posts.
 
----
+## Local HTTP API
 
-## Integrations
+The app discovers its bound port and bearer token through:
 
-Settings → Integrations → Install plugin from GitHub. Official plugins:
+| File | Purpose |
+| --- | --- |
+| `~/.dev-stream/port` | Active localhost port |
+| `~/.dev-stream/token` | Bearer token, stored with mode `0600` |
 
-- `https://github.com/phin-tech/dev-stream-plugins/tree/main/github`
-- `https://github.com/phin-tech/dev-stream-plugins/tree/main/linear`
+The server binds to `127.0.0.1`. Every route except `/api/health` requires the
+token.
 
-- **GitHub** — a PAT with `notifications` + `repo`. Polls your notifications:
-  PRs, reviews requested, issues, failing check suites. Optionally scoped to repos.
-- **Linear** — a personal API key. Polls issues by `updatedAt`, optionally by team.
+```sh
+TOKEN=$(cat ~/.dev-stream/token)
+PORT=$(cat ~/.dev-stream/port)
+API=http://127.0.0.1:$PORT
 
-They run in permission-scoped workers and cannot poll until you trust the manifest.
-Their posts use the same ingestion path, so they are filterable and searchable like
-everything else. A first poll looks back 24h rather than importing an entire backlog.
+curl -X POST "$API/api/posts" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "content-type: application/json" \
+  -d '{
+    "source": "ci",
+    "kind": "alert",
+    "title": "Deploy failed on main",
+    "summary": "The production build exited with status 1.",
+    "body": "Step **build** failed.",
+    "tags": ["deploy", "failed"],
+    "meta": {
+      "project": "dev-stream",
+      "repo": "phin-tech/dev-stream"
+    },
+    "dedupe_key": "build-1234"
+  }'
+```
 
-> Credentials are stored in plaintext in the local SQLite DB. Single-user,
-> machine-local — but worth knowing before pasting a broadly-scoped token.
-> (Keychain is the obvious V1.1 improvement.)
+`POST /api/posts` accepts one object, a bare array, or
+`{"posts": [...]}`. Batch writes are atomic.
 
----
+### Important routes
 
-## Views, mutes, retention
+| Route | Purpose |
+| --- | --- |
+| `GET /api/health` | Discovery and liveness |
+| `GET /api/events` | Live SSE stream |
+| `GET·POST /api/posts` | Query or create posts |
+| `GET /api/posts/:id` | Fetch one post |
+| `POST /api/posts/:id/seen` | Mark read |
+| `POST /api/posts/:id/unseen` | Mark unread |
+| `POST /api/posts/:id/archive` | Archive |
+| `POST /api/posts/:id/restore` | Restore |
+| `GET /api/facets` | Filter values and counts |
+| `GET·POST /api/views` | List or create saved views |
+| `PATCH·DELETE /api/views/:id` | Update or remove a view |
+| `GET·PUT /api/settings` | Read or update settings |
+| `GET /api/sources` | Installed source plugins |
 
-- **Views** are saved filters — "Claude on repo X", "everything tagged #deploy" —
-  with unread counts since you last opened them.
-- **Muting** a source or tag (⋯ on any card) hides it *everywhere*, including
-  `dev-stream tail`. It never deletes: unmuting brings the history back.
-- **Retention** is off by default. Set it and posts older than N days are swept at
-  startup and daily — by *event* time, so a post backfilled today about last year
-  counts as a year old.
-- **Keyboard**: `j`/`k` to move, `g` to jump to the top, `.` to take new posts.
+Post queries support repeatable `source`, `project`, `repo`, `kind`, and
+`tag` parameters, plus `q`, `since`, `until`, `archived`, `limit`,
+and an opaque pagination `cursor`.
 
----
+## Source plugins
+
+Plugins are installed from Settings and run in permission-scoped Deno workers.
+A plugin cannot poll until its manifest is trusted. Network access is restricted
+to declared hosts, and changing a manifest revokes its previous trust grant.
+
+Official plugin sources can provide integrations such as GitHub notifications
+and Linear issue updates. Their posts use the normal ingestion path, so they are
+searchable, filterable, archivable, and visible to saved views.
+
+Credentials currently live in the machine-local SQLite database. They are not
+synced, but they are not stored in Keychain yet.
+
+## Data behavior
+
+- Saved views are named filters with independent unread markers.
+- Muting hides a source or tag without deleting its history.
+- Archive is reversible and separate from muting.
+- Retention is disabled by default and uses event time when enabled.
+- Pagination uses a stable keyset cursor so new live events do not shift older
+  pages.
+- Markdown is sanitized before rendering.
 
 ## Development
 
 ```sh
-task dev        # Vite dev server + headless backend, with hot reload
-task api        # just the backend — curl it without a window
-task check      # deno check + svelte-check
-task test       # the full suite
-task            # list every target
+deno task dev          # Vite frontend and headless backend
+deno task api          # backend only
+npm run check          # Svelte and TypeScript diagnostics
+deno task test         # unit and integration tests
+npm run test:e2e -- --workers=1
 ```
 
-`task api` runs the whole backend with no webview, which is how the API is developed
-and tested. `DEV_STREAM_HOME` relocates `~/.dev-stream` (the tests use it, so they
-never touch your real timeline).
+The browser suite shares one local backend and database, so run it with one worker
+when executing the full file.
 
-Every Task target maps onto a `deno task` of the same name, so
-`deno task api` works too if you'd rather not install Task.
+### Repository layout
 
-### Layout
+| Path | Responsibility |
+| --- | --- |
+| `main.ts` | Desktop entrypoint and native window |
+| `server/` | SQLite, API, SSE, archive, views, plugins, retention |
+| `cli/` | CLI and Claude hook adapter |
+| `mcp/` | MCP stdio server |
+| `src/` | SvelteKit interface and shared types |
+| `e2e/` | Desktop timeline browser regressions |
 
-| Path        | What                                                                  |
-| ----------- | --------------------------------------------------------------------- |
-| `main.ts`   | Desktop entrypoint: SvelteKit + window + bindings + backend.           |
-| `server/`   | SQLite, ingestion API, SSE, spool, views, retention, integrations.     |
-| `cli/`      | The `dev-stream` binary and the Claude hook adapter.                   |
-| `mcp/`      | The stdio MCP server.                                                  |
-| `src/`      | SvelteKit UI. `src/shared/types.ts` is the contract everything shares. |
-
-### Release
+## Build and release
 
 ```sh
-task release      # signed .app with icon
-task build:all    # cross-compiled CLI binaries
+deno task build:cli
+deno task build:app
+deno task install
 ```
 
-The release build re-runs `codesign` on purpose: `deno desktop` copies the icon into
-the bundle *after* signing it, which invalidates the signature. Swap the ad-hoc `-`
-identity for a Developer ID to distribute. `--compress` is deliberately unused — see
-the note in `deno.json`.
-
----
-
-## Smoke test
-
-On a fresh machine:
-
-- [ ] First launch creates `~/.dev-stream/{token,port,stream.db}`; token is `0600`.
-- [ ] `curl` posts, and the card appears in the window without a refresh.
-- [ ] Kill the app, `dev-stream post` → spooled. Relaunch → it drains into the feed
-      at its original timestamp, not at the top.
-- [ ] Launch a second instance → the running window focuses; no duplicate.
-- [ ] `dev-stream init claude`, then a Claude session → live activity.
-- [ ] 10k posts: feed and filters stay responsive. (Measured: first page 0.4 ms,
-      search 1.9 ms, facets 6.5 ms, deep keyset page 0.6 ms.)
-- [ ] Restart → data survives.
+The local app is ad-hoc codesigned after bundling. Distribution builds should use
+a Developer ID identity and the normal notarization flow.

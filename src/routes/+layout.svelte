@@ -1,9 +1,55 @@
 <script lang="ts">
 	import favicon from '$lib/assets/favicon.svg';
 	import { page } from '$app/state';
+	import ShortcutOverlay from '$lib/components/ShortcutOverlay.svelte';
+	import { goto } from '$app/navigation';
+	import { globalShortcutDefinitions } from '$lib/shortcut-catalog';
+	import { advanceShortcut, initialShortcutState } from '$lib/shortcut-engine';
 
 	let { children } = $props();
+	let overlay = $state<ShortcutOverlay | null>(null);
+	let shortcutState = initialShortcutState;
+
+	function isTextEntry(target: EventTarget | null): boolean {
+		return target instanceof HTMLElement &&
+			(target.matches("input, textarea, select, [contenteditable='true'], [role='textbox']") || target.isContentEditable);
+	}
+
+	function handleGlobalKeydown(event: KeyboardEvent) {
+		if (overlay?.isOpen()) {
+			if (overlay.handleKeydown(event)) event.stopImmediatePropagation();
+			return;
+		}
+
+		const result = advanceShortcut(globalShortcutDefinitions, shortcutState, {
+			key: event.key,
+			metaKey: event.metaKey,
+			ctrlKey: event.ctrlKey,
+			altKey: event.altKey,
+			shiftKey: event.shiftKey,
+			repeat: event.repeat,
+			isComposing: event.isComposing
+		}, {
+			now: performance.now(),
+			platform: 'mac',
+			activeScopes: ['global'],
+			textEntry: isTextEntry(event.target)
+		});
+		shortcutState = result.state;
+		if (!result.commandId) return;
+		event.preventDefault();
+		event.stopImmediatePropagation();
+		if (result.commandId === 'open-command-palette') void overlay?.open('palette');
+		else if (result.commandId === 'show-shortcuts') void overlay?.open('help');
+		else if (result.commandId === 'open-settings') void goto('/settings');
+		else if (result.commandId === 'open-timeline') {
+			if (page.url.pathname === '/') window.dispatchEvent(new CustomEvent('dev-stream-command', { detail: 'open-timeline' }));
+			else void goto('/');
+		}
+	}
 </script>
+
+<svelte:window onkeydown={handleGlobalKeydown} />
 
 <svelte:head>
 	<link rel="icon" href={favicon} />
@@ -14,11 +60,13 @@
 	<div class="nav-links">
 		<a href="/" class:current={page.url.pathname === '/'}>Timeline</a>
 		<a href="/settings" class:current={page.url.pathname === '/settings'}>Settings</a>
+		<a href="/help" class:current={page.url.pathname === '/help'}>Help</a>
 	</div>
 	<span class="connection"><span></span>Live</span>
 </nav>
 
 {@render children()}
+<ShortcutOverlay bind:this={overlay} />
 
 <style>
 		:global(:root) {
@@ -41,7 +89,7 @@
 			--accent: var(--live);
 			--accent-soft: var(--live-soft);
 			--mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, monospace;
-			--sans: ui-rounded, 'SF Pro Rounded', 'Avenir Next', system-ui, sans-serif;
+			--sans: system-ui;
 			--space-xs: 0.25rem;
 			--space-sm: 0.5rem;
 			--space-md: 0.75rem;
@@ -49,8 +97,11 @@
 			--space-xl: 1.5rem;
 			--radius-sm: 0.5rem;
 			--radius-md: 0.75rem;
+			--radius-lg: 1rem;
 			--z-dropdown: 20;
 			--z-sticky: 30;
+			--z-modal: 60;
+			--z-tooltip: 70;
 			--ease-out: cubic-bezier(0.22, 1, 0.36, 1);
 		}
 
@@ -69,6 +120,10 @@
 		color: inherit;
 	}
 
+	:global(input) {
+		font: inherit;
+	}
+
 	/* Visible keyboard focus everywhere, in the signal colour. */
 	:global(:focus-visible) {
 		outline: 2px solid var(--live);
@@ -84,15 +139,17 @@
 		flex-direction: column;
 	}
 
-		nav {
+			nav {
+		position: relative;
 		display: flex;
 		align-items: center;
 			gap: var(--space-xl);
 			padding: 0 var(--space-lg);
-			height: 3.5rem;
+			height: 3rem;
 		flex-shrink: 0;
-		border-bottom: 1px solid var(--rail);
-			background: var(--surface);
+			background: color-mix(in oklch, var(--surface) 84%, transparent);
+			-webkit-backdrop-filter: blur(16px) saturate(1.4);
+			backdrop-filter: blur(16px) saturate(1.4);
 		}
 
 	.brand {
@@ -116,8 +173,8 @@
 			box-shadow: 0 4px 8px oklch(0.06 0.03 255 / 0.45);
 		}
 		.brand-mark span { color: var(--fg); }
-		.nav-links { display: flex; align-self: stretch; gap: var(--space-xs); margin-inline: auto; }
-		.connection { display: flex; align-items: center; gap: var(--space-sm); color: var(--fg-soft); font-size: 0.78rem; }
+		.nav-links { display: flex; align-self: stretch; gap: var(--space-xs); margin-inline: 0; }
+		.connection { display: flex; align-items: center; gap: var(--space-sm); margin-left: auto; color: var(--fg-soft); font-size: 0.78rem; }
 		.connection span { width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--success); box-shadow: 0 0 0 3px color-mix(in oklch, var(--success) 18%, transparent); }
 		a {
 			display: flex;

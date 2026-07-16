@@ -7,6 +7,7 @@ import {
   ValidationError,
 } from "./posts.ts";
 import { DEDUPE_WINDOW_MS } from "./paths.ts";
+import { archivePost, restorePost } from "./archive.ts";
 
 const db = () => openDb(":memory:");
 
@@ -37,6 +38,19 @@ Deno.test("summary survives round-trip and is searchable", () => {
   });
   assertEquals(post.summary, "Payment retries are now resilient.");
   assertEquals(queryPosts(d, { q: "resilient" }).posts[0].id, post.id);
+});
+
+Deno.test("archived posts leave the timeline and remain recoverable", () => {
+  const d = db();
+  const { post } = insertPost(d, { source: "agent", title: "finished task" });
+
+  assertEquals(archivePost(d, post.id), true);
+  assertEquals(queryPosts(d, {}).posts, []);
+  assertEquals(queryPosts(d, { archived: true }).posts[0].archived, true);
+
+  assertEquals(restorePost(d, post.id), true);
+  assertEquals(queryPosts(d, { archived: true }).posts, []);
+  assertEquals(queryPosts(d, {}).posts[0].archived, false);
 });
 
 Deno.test("rejects posts missing required fields", () => {

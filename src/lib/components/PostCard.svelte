@@ -4,7 +4,7 @@
 	import { openExternal } from '../api';
 	import { absoluteTime, KIND_TONE, relativeTime, sourceColor } from '../format';
 	import { renderMarkdown } from '../markdown';
-	import { needsProgressiveDisclosure, resolvePostPreview } from '../timeline';
+	import { needsProgressiveDisclosure, postLinks, resolvePostPreview } from '../timeline';
 
 	interface Props {
 		post: Post;
@@ -14,13 +14,14 @@
 		onMute: (dimension: 'source' | 'tag', value: string) => void;
 		/** Sets this post's read state: true when it's interacted with, false to mark unread. */
 		onSeenChange: (seen: boolean) => void;
+		onArchive: () => void;
 		/** Keyboard selection (j/k). */
 		selected?: boolean;
 		/** Just arrived live -- its node on the rail pulses briefly. */
 		fresh?: boolean;
 	}
 
-	let { post, onFilter, onMute, onSeenChange, selected = false, fresh = false }: Props = $props();
+	let { post, onFilter, onMute, onSeenChange, onArchive, selected = false, fresh = false }: Props = $props();
 
 	let menuOpen = $state(false);
 	let menuButton = $state<HTMLButtonElement | null>(null);
@@ -48,37 +49,7 @@
 		Object.fromEntries(Object.entries(post.meta).filter(([key]) => !SHOWN.includes(key)))
 	);
 
-	/** Only http(s) survives: `meta` is open JSON any client can write, so a link
-	 *  could carry a `javascript:` or other scheme we must not hand to the OS. */
-	function httpUrl(value: unknown): string | null {
-		if (typeof value !== 'string') return null;
-		try {
-			const url = new URL(value);
-			return url.protocol === 'http:' || url.protocol === 'https:' ? value : null;
-		} catch {
-			return null;
-		}
-	}
-
-	// The card's links, deduped by URL: the named `meta.links` first, then the
-	// single canonical `meta.url` as a plain "open" chip if nothing already covers
-	// it. Validated here rather than trusted, since anything can post to the API.
-	const links = $derived.by(() => {
-		const out: { label: string; url: string }[] = [];
-		const seen = new Set<string>();
-		const push = (label: unknown, rawUrl: unknown) => {
-			const url = httpUrl(rawUrl);
-			if (!url || seen.has(url) || typeof label !== 'string' || !label.trim()) return;
-			seen.add(url);
-			out.push({ label: label.trim(), url });
-		};
-
-		if (Array.isArray(post.meta.links)) {
-			for (const link of post.meta.links) push(link?.label, link?.url);
-		}
-		push('open', post.meta.url);
-		return out;
-	});
+	const links = $derived(postLinks(post.meta));
 
 	// NB: not called `state` -- a local by that name makes Svelte parse the
 	// `$state(...)` rune above as a store subscription of it, which is a baffling
@@ -170,6 +141,9 @@
 				{#if menuOpen}
 					<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
 					<div class="menu" onclick={(e) => e.stopPropagation()}>
+						<button onclick={() => { onArchive(); menuOpen = false; }}>
+							{post.archived ? 'Restore' : 'Archive'}
+						</button>
 						{#if post.seen}
 							<button onclick={() => { onSeenChange(false); menuOpen = false; }}>
 								Mark as unread
@@ -259,20 +233,21 @@
 		display: grid;
 		grid-template-columns: 3.5rem 1fr;
 		gap: var(--space-md);
-		padding: var(--space-md);
-		margin-block: var(--space-xs);
-		border: 1px solid var(--rail-soft);
-		border-radius: var(--radius-md);
-		background: var(--surface);
+		padding: 0.625rem var(--space-md);
+		margin-block: 0;
+		border: 0;
+		border-bottom: 1px solid var(--rail-soft);
+		border-radius: 0;
+		background: transparent;
 		transition: transform 180ms var(--ease-out), border-color 180ms var(--ease-out), background 180ms var(--ease-out);
 	}
 	.post:hover {
-		transform: translateY(-1px);
+		border-radius: 0.625rem;
 		border-color: var(--rail);
-		background: var(--surface-raised);
+		background: color-mix(in oklch, var(--surface-raised) 55%, transparent);
 	}
 	.post.selected {
-		border-color: var(--live);
+		box-shadow: inset 0 0 0 1px var(--live);
 		background: color-mix(in oklch, var(--surface-raised) 88%, var(--live));
 	}
 
@@ -291,7 +266,16 @@
 		color: var(--live-soft);
 	}
 	/* The node. Quiet by default; the rail is what carries the eye, not the dots. */
-	.post:not(.seen) { border-color: color-mix(in oklch, var(--live) 55%, var(--rail)); }
+	.post:not(.seen) .when::before {
+		content: '';
+		display: inline-block;
+		width: 0.4rem;
+		height: 0.4rem;
+		margin-right: var(--space-sm);
+		border-radius: 50%;
+		background: var(--live);
+		box-shadow: 0 0 0 3px color-mix(in oklch, var(--live) 14%, transparent);
+	}
 	.post.alert { border-color: color-mix(in oklch, var(--alert) 65%, var(--rail)); }
 	.post.fresh { animation: card-arrival 320ms var(--ease-out); }
 	@keyframes card-arrival { from { transform: translateY(-0.4rem); filter: brightness(1.25); } }
@@ -510,15 +494,16 @@
 
 	.chip {
 		font-size: 0.75rem;
-		padding: var(--space-xs) var(--space-sm);
-		border-radius: 999px;
-		border: 1px solid var(--rail);
+		padding: 0;
+		border-radius: 0;
+		border: 0;
 		color: var(--fg-dim);
 		background: transparent;
 	}
 	.chip:hover {
-		border-color: var(--live);
 		color: var(--live-soft);
+		text-decoration: underline;
+		text-underline-offset: 0.18em;
 	}
 	.chip.tag {
 		color: var(--fg-soft);
@@ -531,6 +516,9 @@
 		color: var(--live);
 	}
 	.chip.link {
+		padding: var(--space-xs) var(--space-sm);
+		border-radius: 999px;
+		border: 1px solid color-mix(in oklch, var(--live) 60%, var(--rail));
 		border-color: color-mix(in oklch, var(--live) 60%, var(--rail));
 		background: color-mix(in oklch, var(--live) 12%, var(--surface));
 		color: var(--live-soft);

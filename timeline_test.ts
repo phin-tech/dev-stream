@@ -6,6 +6,7 @@ import {
   resolvePostPreview,
   resolveSidebarCollapsed,
   selectionRevealMode,
+  postLinks,
 } from "./src/lib/timeline.ts";
 
 Deno.test("live activity appears inline when the reader is at the top", () => {
@@ -106,4 +107,20 @@ Deno.test("blank summaries fall back to the body instead of hiding useful contex
 Deno.test("selecting the first post reveals the timeline heading", () => {
   assertEquals(selectionRevealMode(0), "top");
   assertEquals(selectionRevealMode(1), "nearest");
+});
+
+Deno.test("post links preserve declared priority and reject unsafe URLs", () => {
+  assertEquals(
+    postLinks({
+      links: [
+        { label: "Pull request", url: "https://example.com/pr/12" },
+        { label: "unsafe", url: "javascript:alert(1)" },
+      ],
+      url: "https://example.com/fallback",
+    }),
+    [
+      { label: "Pull request", url: "https://example.com/pr/12" },
+      { label: "open", url: "https://example.com/fallback" },
+    ],
+  );
 });

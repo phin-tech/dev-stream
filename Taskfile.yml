@@ -107,6 +107,12 @@ tasks:
     cmds:
       - deno task test server/ cli/
 
+  test:e2e:
+    desc: Playwright browser tests against a real (isolated) backend + UI
+    deps: [install]
+    cmds:
+      - npm run test:e2e
+
   verify:
     desc: What CI would run — typecheck, test, and prove the app still builds
     cmds:

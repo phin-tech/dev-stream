@@ -51,6 +51,8 @@ interface PostRow {
   updated_at: string;
   /** 0/1 from the LEFT JOIN on seen_posts; absent on reads that don't join it. */
   seen?: number;
+  /** 0/1 from the LEFT JOIN on archived_posts. */
+  archived?: number;
 }
 
 function rowToPost(row: PostRow): Post {
@@ -73,12 +75,14 @@ function rowToPost(row: PostRow): Post {
   // Only when the read actually joined seen_posts. A write path returns a post
   // without a `seen` column, and its read state is nobody's business there.
   if (row.seen !== undefined) post.seen = row.seen === 1;
+  if (row.archived !== undefined) post.archived = row.archived === 1;
   return post;
 }
 
 /** `SELECT p.*` plus the reader's read state, for every path that returns a Post. */
-const POST_COLUMNS = "p.*, (s.post_id IS NOT NULL) AS seen";
+const POST_COLUMNS = "p.*, (s.post_id IS NOT NULL) AS seen, (a.post_id IS NOT NULL) AS archived";
 const SEEN_JOIN = "LEFT JOIN seen_posts s ON s.post_id = p.id";
+const ARCHIVE_JOIN = "LEFT JOIN archived_posts a ON a.post_id = p.id";
 
 function str(
   value: unknown,
@@ -387,6 +391,10 @@ export function buildWhere(
   const where: string[] = [];
   const params: (string | number)[] = [];
 
+  where.push(query.archived
+    ? "EXISTS (SELECT 1 FROM archived_posts a WHERE a.post_id = p.id)"
+    : "NOT EXISTS (SELECT 1 FROM archived_posts a WHERE a.post_id = p.id)");
+
   const inClause = (column: Dimension, values: string[] | undefined) => {
     if (omit === column || !values?.length) return;
     where.push(`p.${column} IN (${values.map(() => "?").join(", ")})`);
@@ -501,6 +509,7 @@ export function queryPosts(db: Db, query: PostQuery): PostPage {
   const sql = `
 		SELECT ${POST_COLUMNS} FROM posts p
 		${SEEN_JOIN}
+		${ARCHIVE_JOIN}
 		${whereSql(where)}
 		ORDER BY p.ts DESC, p.id DESC
 		LIMIT ?`;
@@ -525,7 +534,7 @@ export function queryPosts(db: Db, query: PostQuery): PostPage {
 
 export function getPost(db: Db, id: string): Post | null {
   const row = db
-    .prepare(`SELECT ${POST_COLUMNS} FROM posts p ${SEEN_JOIN} WHERE p.id = ?`)
+    .prepare(`SELECT ${POST_COLUMNS} FROM posts p ${SEEN_JOIN} ${ARCHIVE_JOIN} WHERE p.id = ?`)
     .get(id) as unknown as PostRow | undefined;
   return row ? rowToPost(row) : null;
 }

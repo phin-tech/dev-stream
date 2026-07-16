@@ -80,6 +80,8 @@
 	<input
 		type="search"
 		placeholder="Search the timeline…"
+		aria-label="Search the timeline…"
+		title="Search — ⌘F or /"
 		bind:value={search}
 		oninput={onSearchInput}
 	/>
@@ -132,9 +134,9 @@
 		display: flex;
 		align-items: center;
 		gap: var(--space-sm);
-		padding: var(--space-md) var(--space-lg);
-		border-bottom: 1px solid var(--rail);
-		background: color-mix(in oklch, var(--surface) 65%, var(--ink));
+		padding: var(--space-sm) var(--space-lg);
+		border-bottom: 0;
+		background: transparent;
 		flex-wrap: wrap;
 	}
 

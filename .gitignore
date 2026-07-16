@@ -28,6 +28,13 @@ Thumbs.db
 # The throwaway timeline `task dev` writes to, so development never touches the
 # real ~/.dev-stream.
 /.dev-stream-dev/
+# Same idea, for `task test:e2e` (see e2e/run-server.sh).
+/.dev-stream-e2e/
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
 
 # Taskfile's checksum cache
 /.task/

@@ -1127,6 +1127,7 @@
       "dependencies": [
         "npm:@deno/svelte-adapter@~0.2.1",
         "npm:@modelcontextprotocol/sdk@^1.29.0",
+        "npm:@playwright/test@^1.61.1",
         "npm:@sveltejs/kit@^2.63.0",
         "npm:@sveltejs/vite-plugin-svelte@^7.1.2",
         "npm:@types/node@^26.1.1",

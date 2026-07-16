@@ -80,6 +80,7 @@ function toQueryString(query: PostQuery): string {
 	for (const key of ['q', 'since', 'until', 'cursor'] as const) {
 		if (query[key]) params.set(key, String(query[key]));
 	}
+	if (query.archived) params.set('archived', 'true');
 	if (query.limit) params.set('limit', String(query.limit));
 	const qs = params.toString();
 	return qs ? `?${qs}` : '';
@@ -128,6 +129,14 @@ export function markPostSeen(id: string): Promise<Post> {
 /** Clears a post's read marker, so it counts as unread again. */
 export function markPostUnseen(id: string): Promise<Post> {
 	return request<Post>(`/api/posts/${encodeURIComponent(id)}/unseen`, { method: 'POST' });
+}
+
+export function archivePost(id: string): Promise<Post> {
+	return request<Post>(`/api/posts/${encodeURIComponent(id)}/archive`, { method: 'POST' });
+}
+
+export function restorePost(id: string): Promise<Post> {
+	return request<Post>(`/api/posts/${encodeURIComponent(id)}/restore`, { method: 'POST' });
 }
 
 /**

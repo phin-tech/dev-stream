@@ -14,6 +14,8 @@ import {
 	markAllSeen as markAllSeenRequest,
 	markPostSeen,
 	markPostUnseen,
+	archivePost as archivePostRequest,
+	restorePost as restorePostRequest,
 	markViewSeen,
 	saveSettings,
 	subscribe
@@ -32,6 +34,8 @@ const EMPTY_FACETS: Facets = { source: [], project: [], repo: [], kind: [], tag:
  * subtly wrong. While a search is active, `Feed` refuses to guess (see `#onPost`).
  */
 export function matchesFilter(post: Post, filter: PostFilter): boolean {
+	// Live arrivals have never been archived, so they cannot belong in Archive.
+	if (filter.archived) return false;
 	const inList = (values: string[] | undefined, actual: string | undefined) =>
 		!values?.length || (actual !== undefined && values.includes(actual));
 
@@ -193,6 +197,25 @@ export class Feed {
 			await markPostUnseen(id);
 		} catch {
 			post.seen = true;
+		}
+	}
+
+	/** Archives or restores a post and removes it from the current opposing view. */
+	async toggleArchived(id: string): Promise<void> {
+		const index = this.posts.findIndex((post) => post.id === id);
+		if (index < 0) return;
+		const post = this.posts[index];
+		const nextArchived = !post.archived;
+		this.posts = this.posts.filter((candidate) => candidate.id !== id);
+		this.selected = Math.min(index, this.posts.length - 1);
+		try {
+			await (nextArchived ? archivePostRequest(id) : restorePostRequest(id));
+			await this.refreshViews();
+		} catch (err) {
+			post.archived = !nextArchived;
+			this.posts = [...this.posts.slice(0, index), post, ...this.posts.slice(index)];
+			this.selected = index;
+			this.error = String(err);
 		}
 	}
 

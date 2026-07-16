@@ -2,12 +2,14 @@
 	import { onMount } from 'svelte';
 	import FilterBar from '$lib/components/FilterBar.svelte';
 	import PostCard from '$lib/components/PostCard.svelte';
+	import QuickLook from '$lib/components/QuickLook.svelte';
 	import ViewSidebar from '$lib/components/ViewSidebar.svelte';
 	import { Feed } from '$lib/feed.svelte';
-	import { createView, deleteView, updateView } from '$lib/api';
+	import { createView, deleteView, openExternal } from '$lib/api';
 	import { dispatchKey, NAV_COMMANDS, viewCommands, type CommandContext } from '$lib/commands';
 	import { dayKey, dayLabel } from '$lib/format';
-	import { activityArrivalMode } from '$lib/timeline';
+	import { activityArrivalMode, postLinks } from '$lib/timeline';
+	import { quickLookIntent } from '$lib/interaction-policy';
 	import type { PostFilter, ViewWithUnread } from '../shared/types';
 
 	const feed = new Feed();
@@ -15,6 +17,7 @@
 	let scroller = $state<HTMLElement | null>(null);
 	let sentinel = $state<HTMLElement | null>(null);
 	let atTop = $state(true);
+	let quickLookPostId = $state<string | null>(null);
 	const arrivalMode = $derived(activityArrivalMode({ pendingCount: feed.pending.length, atTop }));
 
 	const mutedCount = $derived(
@@ -24,10 +27,16 @@
 	// Loaded unread posts. A lower bound -- there may be more below the fold -- so
 	// the count is shown with a "+" whenever the timeline has another page.
 	const unseenCount = $derived(feed.posts.filter((p) => !p.seen).length);
+	const archiveActive = $derived(feed.activeViewId === null && feed.filter.archived === true);
+	const quickLookPost = $derived(feed.posts.find((post) => post.id === quickLookPostId) ?? null);
 
 	onMount(() => {
 		void feed.start();
-		return () => feed.stop();
+		window.addEventListener('dev-stream-command', handleAppCommand as EventListener);
+		return () => {
+			window.removeEventListener('dev-stream-command', handleAppCommand as EventListener);
+			feed.stop();
+		};
 	});
 
 	$effect(() => {
@@ -95,10 +104,98 @@
 		scroller?.scrollTo({ top: 0 });
 	}
 
-	function toggleSelectedDetails() {
-		if (!scroller || feed.selected < 0) return;
+	function selectedDisclosure(): HTMLButtonElement | null {
+		if (!scroller || feed.selected < 0) return null;
 		const card = scroller.querySelectorAll<HTMLElement>('article[data-post-id]')[feed.selected];
-		card?.querySelector<HTMLButtonElement>('[data-disclosure-toggle]')?.click();
+		return card?.querySelector<HTMLButtonElement>('[data-disclosure-toggle]') ?? null;
+	}
+
+	function openSelectedDetails() {
+		const post = feed.posts[feed.selected];
+		if (!post) return;
+		void feed.markSeen(post.id);
+		const disclosure = selectedDisclosure();
+		if (disclosure?.getAttribute('aria-expanded') === 'false') disclosure.click();
+	}
+
+	function closeSelectedDetails(): boolean {
+		const disclosure = selectedDisclosure();
+		if (disclosure?.getAttribute('aria-expanded') !== 'true') return false;
+		disclosure.click();
+		return true;
+	}
+
+	function toggleSelectedQuickLook() {
+		const post = feed.posts[feed.selected];
+		const intent = quickLookIntent({
+			hasSelection: Boolean(post),
+			quickLookOpen: Boolean(quickLookPost)
+		});
+		quickLookPostId = intent === 'open' && post ? post.id : null;
+	}
+
+	function handleTimelineKeydown(event: KeyboardEvent) {
+		if (quickLookPost) {
+			if (event.key === ' ' || event.key === 'Escape') {
+				event.preventDefault();
+				quickLookPostId = null;
+			} else if (event.key === 'Enter' && !event.metaKey && !event.ctrlKey) {
+				event.preventDefault();
+				quickLookPostId = null;
+				openSelectedDetails();
+			}
+			return;
+		}
+		if (event.key === 'Escape' && closeSelectedDetails()) {
+			event.preventDefault();
+			return;
+		}
+		dispatchKey(commands, event, ctx);
+	}
+
+	function handleAppCommand(event: CustomEvent<string>) {
+		const command = commands.find((candidate) => candidate.id === event.detail);
+		if (command && (!command.enabled || command.enabled(ctx))) {
+			void command.run(ctx, event as unknown as KeyboardEvent);
+		}
+	}
+
+	function focusSearch() {
+		document.querySelector<HTMLInputElement>("input[type='search']")?.focus();
+	}
+
+	function scrollToBottom() {
+		if (!scroller) return;
+		feed.selected = Math.max(0, feed.posts.length - 1);
+		scroller.scrollTo({ top: scroller.scrollHeight, behavior: 'smooth' });
+	}
+
+	function toggleSelectedRead() {
+		const post = feed.posts[feed.selected];
+		if (!post) return;
+		void (post.seen ? feed.markUnseen(post.id) : feed.markSeen(post.id));
+	}
+
+	function toggleSidebar() {
+		document.querySelector<HTMLButtonElement>('.sidebar-toggle')?.click();
+	}
+
+	function selectedLink(): string | null {
+		const post = feed.posts[feed.selected];
+		return post ? (postLinks(post.meta)[0]?.url ?? null) : null;
+	}
+
+	function openSelectedLink() {
+		const post = feed.posts[feed.selected];
+		const url = selectedLink();
+		if (!post || !url) return;
+		void feed.markSeen(post.id);
+		void openExternal(url);
+	}
+
+	function toggleSelectedArchive() {
+		const post = feed.posts[feed.selected];
+		if (post) void feed.toggleArchived(post.id);
 	}
 
 	// --- commands ------------------------------------------------------------
@@ -118,7 +215,16 @@
 		openTimeline: () => openTimeline(),
 		openView: (view) => openView(view),
 		showNew: () => showNew(),
-		toggleSelectedDetails
+		openSelectedDetails,
+		toggleSelectedQuickLook,
+		focusSearch,
+		scrollToBottom,
+		scrollPage: (direction) => scroller?.scrollBy({ top: direction * (scroller.clientHeight / 2), behavior: 'smooth' }),
+		toggleSelectedRead,
+		toggleSidebar,
+		hasSelectedLink: () => selectedLink() !== null,
+		openSelectedLink,
+		toggleSelectedArchive
 	};
 
 	// Static timeline commands plus one per saved view (Cmd/Ctrl 1–9, 0), rebuilt
@@ -146,17 +252,13 @@
 		}
 	}
 
-	async function togglePin(view: ViewWithUnread) {
-		try {
-			await updateView(view.id, { pinned: !view.pinned });
-			await feed.refreshViews();
-		} catch (err) {
-			feed.error = String(err);
-		}
-	}
-
 	function openTimeline() {
 		feed.setFilter({});
+		scroller?.scrollTo({ top: 0 });
+	}
+
+	function openArchive() {
+		feed.setFilter({ archived: true });
 		scroller?.scrollTo({ top: 0 });
 	}
 
@@ -166,47 +268,50 @@
 	}
 </script>
 
-<svelte:window onkeydown={(e) => dispatchKey(commands, e, ctx)} />
+<svelte:window onkeydown={handleTimelineKeydown} />
 
 <div class="layout">
 	<ViewSidebar
 		views={feed.views}
 		activeViewId={feed.activeViewId}
+		{archiveActive}
 		filter={feed.filter}
 		onOpen={openView}
 		onOpenTimeline={openTimeline}
+		onOpenArchive={openArchive}
 		onSave={saveView}
 		onDelete={removeView}
-		onTogglePin={togglePin}
 	/>
 
 	<section class="feed">
-		<FilterBar
-			filter={feed.filter}
-			facets={feed.facets}
-			onChange={(filter) => {
-				feed.setFilter(filter);
-				scroller?.scrollTo({ top: 0 });
-			}}
-		/>
+		<div class="control-surface">
+			<FilterBar
+				filter={feed.filter}
+				facets={feed.facets}
+				onChange={(filter) => {
+					feed.setFilter(filter);
+					scroller?.scrollTo({ top: 0 });
+				}}
+			/>
 
-		{#if mutedCount > 0}
-			<!-- Muting is invisible by construction, which makes it easy to forget
-			     you did it and then wonder where a source went. Say so. -->
-			<div class="muted-bar">
-				{mutedCount}
-				{mutedCount === 1 ? 'source/tag is' : 'sources/tags are'} muted
-				<button onclick={() => feed.unmuteAll()}>Unmute all</button>
-			</div>
-		{/if}
+			{#if mutedCount > 0}
+				<!-- Muting is invisible by construction, which makes it easy to forget
+				     you did it and then wonder where a source went. Say so. -->
+				<div class="muted-bar">
+					{mutedCount}
+					{mutedCount === 1 ? 'source/tag is' : 'sources/tags are'} muted
+					<button onclick={() => feed.unmuteAll()}>Unmute all</button>
+				</div>
+			{/if}
 
-		{#if unseenCount > 0}
-			<div class="read-bar">
-				<span class="count">{unseenCount}{feed.hasMore ? '+' : ''}</span>
-				unread
-				<button onclick={() => feed.markAllSeen()}>Mark all as read</button>
-			</div>
-		{/if}
+			{#if unseenCount > 0}
+				<div class="read-bar">
+					<span class="count">{unseenCount}{feed.hasMore ? '+' : ''}</span>
+					unread
+					<button onclick={() => feed.markAllSeen()}>Mark all as read</button>
+				</div>
+			{/if}
+		</div>
 
 		<main bind:this={scroller} onscroll={trackScroll}>
 			{#if arrivalMode === 'indicator'}
@@ -224,7 +329,9 @@
 				<p class="notice">Loading…</p>
 			{:else if feed.posts.length === 0}
 				<p class="notice">
-					{#if Object.keys(feed.filter).length > 0}
+					{#if feed.filter.archived}
+						Archive is empty.
+					{:else if Object.keys(feed.filter).length > 0}
 						Nothing matches this filter.
 					{:else}
 						Nothing here yet. Try
@@ -251,6 +358,7 @@
 						onFilter={addFilter}
 						onMute={(dimension, value) => feed.mute(dimension, value)}
 						onSeenChange={(seen) => (seen ? feed.markSeen(post.id) : feed.markUnseen(post.id))}
+						onArchive={() => feed.toggleArchived(post.id)}
 					/>
 				{/each}
 
@@ -266,6 +374,10 @@
 	</section>
 </div>
 
+{#if quickLookPost}
+	<QuickLook post={quickLookPost} onClose={() => (quickLookPostId = null)} />
+{/if}
+
 <style>
 	.layout {
 		flex: 1;
@@ -280,11 +392,23 @@
 		min-width: 0;
 	}
 
+	.control-surface {
+		position: relative;
+		z-index: var(--z-dropdown);
+		margin: var(--space-md) var(--space-md) var(--space-sm);
+		border-radius: var(--radius-md);
+		background: color-mix(in oklch, var(--surface) 72%, var(--ink));
+		overflow: visible;
+	}
+
 	main {
 		flex: 1;
 		overflow-y: auto;
 		position: relative;
-		padding: 0 1rem 2rem;
+		margin: 0 var(--space-md) var(--space-md);
+		padding: 0 0 2rem;
+		border-radius: var(--space-lg);
+		background: color-mix(in oklch, var(--surface) 42%, var(--ink));
 	}
 
 	.stream {
@@ -367,7 +491,6 @@
 		font-size: 0.72rem;
 		color: var(--fg-dim);
 		background: var(--inset);
-		border-bottom: 1px solid var(--rail);
 	}
 	.muted-bar button {
 		border: none;
@@ -389,7 +512,6 @@
 		font-size: 0.72rem;
 		color: var(--fg-dim);
 		background: var(--inset);
-		border-bottom: 1px solid var(--rail);
 	}
 	.read-bar .count {
 		color: var(--live-soft);

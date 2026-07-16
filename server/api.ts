@@ -11,6 +11,7 @@ import type { Db } from './db.ts';
 import type { PostQuery, RegistryPluginStatus, ServerInfo, SettingsInfo, SourceStatus, StreamEvent } from '../src/shared/types.ts';
 import { countPosts, getPost, insertPosts, queryFacets, queryPosts, ValidationError } from './posts.ts';
 import { markAllSeen, markSeen, markUnseen } from './seen.ts';
+import { archivePost, restorePost } from './archive.ts';
 import { getSettings, updateSettings } from './settings.ts';
 import { createView, deleteView, listViews, markViewSeen, updateView } from './views.ts';
 import { listSources, saveSourceConfig, setSourceTrust } from './sources/store.ts';
@@ -124,6 +125,7 @@ export function createApiHandler(opts: ApiOptions): (req: Request) => Promise<Re
 			q: url.searchParams.get('q') ?? undefined,
 			since: url.searchParams.get('since') ?? undefined,
 			until: url.searchParams.get('until') ?? undefined,
+			archived: url.searchParams.get('archived') === 'true' || undefined,
 			cursor: url.searchParams.get('cursor') ?? undefined,
 			exclude_source: settings.muted_sources,
 			exclude_tag: settings.muted_tags
@@ -179,6 +181,14 @@ export function createApiHandler(opts: ApiOptions): (req: Request) => Promise<Re
 		if (postMatch && req.method === 'GET') {
 			const post = getPost(db, decodeURIComponent(postMatch[1]));
 			return post ? json(post) : error(404, 'post not found');
+		}
+
+		const archivePostMatch = path.match(/^\/api\/posts\/([^/]+)\/(archive|restore)$/);
+		if (archivePostMatch && req.method === 'POST') {
+			const id = decodeURIComponent(archivePostMatch[1]);
+			const changed = archivePostMatch[2] === 'archive' ? archivePost(db, id) : restorePost(db, id);
+			if (!changed) return error(404, 'post not found');
+			return json(getPost(db, id));
 		}
 
 		// Mark every post matching the given filter as seen ("mark all as read").

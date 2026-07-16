@@ -183,6 +183,14 @@ const MIGRATIONS: string[] = [
   `
 	ALTER TABLE sources ADD COLUMN trusted_hash TEXT;
 	`,
+
+  // --- 7: reversible per-post archive state ---------------------------------
+  `
+	CREATE TABLE archived_posts (
+		post_id     TEXT PRIMARY KEY REFERENCES posts (id) ON DELETE CASCADE,
+		archived_at TEXT NOT NULL
+	);
+	`,
 ];
 
 /**
