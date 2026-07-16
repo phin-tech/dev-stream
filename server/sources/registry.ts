@@ -30,6 +30,12 @@ export function clearPluginWorkers(): void {
 	plugins.length = 0;
 }
 
+export function replacePluginWorker(worker: SourceWorker): void {
+	const index = plugins.findIndex((candidate) => candidate.slug === worker.slug);
+	if (index === -1) plugins.push(worker);
+	else plugins[index] = worker;
+}
+
 export function getWorkers(): SourceWorker[] {
 	return [...plugins];
 }

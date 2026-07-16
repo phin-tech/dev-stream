@@ -8,7 +8,7 @@
  */
 
 import type { Db } from './db.ts';
-import type { PostQuery, ServerInfo, SettingsInfo, SourceStatus, StreamEvent } from '../src/shared/types.ts';
+import type { PostQuery, RegistryPluginStatus, ServerInfo, SettingsInfo, SourceStatus, StreamEvent } from '../src/shared/types.ts';
 import { countPosts, getPost, insertPosts, queryFacets, queryPosts, ValidationError } from './posts.ts';
 import { markAllSeen, markSeen, markUnseen } from './seen.ts';
 import { getSettings, updateSettings } from './settings.ts';
@@ -38,6 +38,8 @@ export interface ApiOptions {
 	};
 	plugins?: {
 		install(url: string): Promise<SourceStatus>;
+		listRegistry(): Promise<RegistryPluginStatus[]>;
+		installRegistry(slug: string): Promise<SourceStatus>;
 	};
 }
 
@@ -311,6 +313,19 @@ export function createApiHandler(opts: ApiOptions): (req: Request) => Promise<Re
 			} catch (err) {
 				return error(400, err instanceof Error ? err.message : String(err));
 			}
+		}
+
+		if (path === '/api/plugins/registry' && req.method === 'GET') {
+			if (!opts.plugins) return error(503, 'plugin registry is not available');
+			try { return json({ plugins: await opts.plugins.listRegistry() }); }
+			catch (err) { return error(502, err instanceof Error ? err.message : String(err)); }
+		}
+
+		const registryInstall = path.match(/^\/api\/plugins\/registry\/([^/]+)\/install$/);
+		if (registryInstall && req.method === 'POST') {
+			if (!opts.plugins) return error(503, 'plugin registry is not available');
+			try { return json(await opts.plugins.installRegistry(decodeURIComponent(registryInstall[1])), 201); }
+			catch (err) { return error(400, err instanceof Error ? err.message : String(err)); }
 		}
 
 		if (path === '/api/open-external' && req.method === 'POST') {

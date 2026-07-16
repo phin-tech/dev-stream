@@ -27,7 +27,11 @@ function harness(
 	};
 	const handle = createApiHandler({
 		db, broadcaster, token: TOKEN, info, dbPath: ':memory:', onFocusRequest,
-		plugins: install ? { install } : undefined,
+		plugins: install ? {
+			install,
+			listRegistry: () => Promise.resolve([]),
+			installRegistry: () => Promise.reject(new Error('not configured'))
+		} : undefined,
 		openExternal
 	});
 

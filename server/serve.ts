@@ -16,10 +16,11 @@ import { APP_VERSION, DEFAULT_PORT, dbPath, ensureHome, isDefaultHome, pluginsDi
 import { drainSpool } from './spool.ts';
 import { startRetentionSweep } from './retention.ts';
 import { startSourceRunner } from './sources/runner.ts';
-import { registerPluginWorkers } from './sources/registry.ts';
+import { findWorker, registerPluginWorkers, replacePluginWorker } from './sources/registry.ts';
 import { discoverPlugins } from './plugins/manifest.ts';
 import { assertSandboxAvailable, createPluginWorker } from './plugins/adapter.ts';
 import { GitHubContentsSource, installPluginFromGitHub } from './plugins/install.ts';
+import { fetchRegistry, versionAtLeast } from './plugins/catalog.ts';
 import { describeSource } from './sources/store.ts';
 import { diag } from './diag.ts';
 
@@ -95,6 +96,28 @@ export async function startBackend(opts: StartOptions = {}): Promise<Backend> {
 				assertSandboxAvailable();
 				const worker = createPluginWorker(plugin);
 				registerPluginWorkers([worker]);
+				sources.sync();
+				return describeSource(db, worker);
+			},
+			async listRegistry() {
+				return (await fetchRegistry()).map((entry) => {
+					const installed = findWorker(entry.slug);
+					return { ...entry, installed: Boolean(installed),
+						update_available: Boolean(installed && installed.manifestHash !== entry.manifest_sha256),
+						compatible: versionAtLeast(APP_VERSION, entry.min_app_version) };
+				});
+			},
+			async installRegistry(slug) {
+				const entry = (await fetchRegistry()).find((candidate) => candidate.slug === slug);
+				if (!entry) throw new Error(`plugin is not in the registry: ${slug}`);
+				if (!versionAtLeast(APP_VERSION, entry.min_app_version)) throw new Error(`${entry.label} requires dev-stream ${entry.min_app_version}`);
+				const current = findWorker(slug);
+				const url = `https://github.com/${entry.source.owner}/${entry.source.repo}/tree/${entry.source.ref}/${entry.source.path}`;
+				const plugin = await installPluginFromGitHub(url, { pluginsRoot: pluginsDir(), source: pluginSource,
+					expectedManifestHash: entry.manifest_sha256, replace: Boolean(current) });
+				assertSandboxAvailable();
+				const worker = createPluginWorker(plugin);
+				replacePluginWorker(worker);
 				sources.sync();
 				return describeSource(db, worker);
 			}

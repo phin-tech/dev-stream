@@ -4,13 +4,15 @@
 		apiConfig,
 		fetchSettings,
 		fetchSources,
+		fetchPluginRegistry,
 		installPlugin,
+		installRegistryPlugin,
 		regenerateToken,
 		revealInFinder,
 		saveSettings
 	} from '$lib/api';
 	import SourceSettings from '$lib/components/SourceSettings.svelte';
-	import type { SettingsInfo, SourceStatus } from '../../shared/types';
+	import type { RegistryPluginStatus, SettingsInfo, SourceStatus } from '../../shared/types';
 
 	let info = $state<SettingsInfo | null>(null);
 	let token = $state('');
@@ -23,6 +25,9 @@
 	let sources = $state<SourceStatus[]>([]);
 	let pluginUrl = $state('');
 	let installingPlugin = $state(false);
+	let registry = $state<RegistryPluginStatus[]>([]);
+	let registryError = $state<string | null>(null);
+	let registryBusy = $state<string | null>(null);
 
 	onMount(async () => {
 		try {
@@ -36,6 +41,11 @@
 			markSeenOnScroll = settings.mark_seen_on_scroll;
 			token = config.token;
 			sources = integrations;
+			try {
+				registry = await fetchPluginRegistry();
+			} catch (err) {
+				registryError = String(err);
+			}
 		} catch (err) {
 			error = String(err);
 		}
@@ -58,6 +68,22 @@
 			error = String(err);
 		} finally {
 			installingPlugin = false;
+		}
+	}
+
+	async function onRegistryInstall(plugin: RegistryPluginStatus) {
+		registryBusy = plugin.slug;
+		error = null;
+		try {
+			const installed = await installRegistryPlugin(plugin.slug);
+			sources = [...sources.filter((source) => source.slug !== installed.slug), installed];
+			registry = registry.map((entry) => entry.slug === plugin.slug
+				? { ...entry, installed: true, update_available: false } : entry);
+			status = `${plugin.label} ${plugin.installed ? 'updated' : 'installed'}. Review its permissions before enabling it.`;
+		} catch (err) {
+			error = String(err);
+		} finally {
+			registryBusy = null;
 		}
 	}
 
@@ -220,8 +246,26 @@
 				Installed plugins post through the same API as everything else. A plugin cannot run
 				until you review and trust its requested permissions.
 			</p>
+			{#if registryError}
+				<p class="error">Registry unavailable: {registryError}</p>
+			{:else if registry.length > 0}
+				<div class="registry" aria-label="Plugin registry">
+					{#each registry as plugin (plugin.slug)}
+						<div class="registry-row">
+							<div>
+								<strong>{plugin.label}</strong>
+								<span class="version">v{plugin.version}</span>
+								<p>{plugin.description}</p>
+							</div>
+							<button disabled={!plugin.compatible || registryBusy !== null || (plugin.installed && !plugin.update_available)} onclick={() => onRegistryInstall(plugin)}>
+								{registryBusy === plugin.slug ? 'Working…' : plugin.update_available ? 'Update' : plugin.installed ? 'Installed' : plugin.compatible ? 'Install' : `Requires ${plugin.min_app_version}`}
+							</button>
+						</div>
+					{/each}
+				</div>
+			{/if}
 			<form class="plugin-install" onsubmit={(event) => { event.preventDefault(); onPluginInstall(); }}>
-				<label for="plugin-url">Install plugin from GitHub</label>
+				<label for="plugin-url">Install an unlisted plugin from GitHub</label>
 				<div>
 					<input id="plugin-url" type="url" required placeholder="https://github.com/owner/repo/tree/main/plugin" bind:value={pluginUrl} />
 					<button type="submit" disabled={installingPlugin}>{installingPlugin ? 'Installing…' : 'Install'}</button>
@@ -389,6 +433,12 @@
 		font-size: 0.82rem;
 	}
 	.plugin-install { margin: var(--space-lg) 0; }
+	.registry { margin: var(--space-lg) 0; border-block: 1px solid var(--rail-soft); }
+	.registry-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-lg); padding: var(--space-md) 0; border-bottom: 1px solid var(--rail-soft); }
+	.registry-row:last-child { border-bottom: 0; }
+	.registry-row strong { font-size: 0.9rem; }
+	.registry-row p { margin: var(--space-xs) 0 0; color: var(--fg-soft); font-size: 0.8rem; line-height: 1.4; }
+	.version { margin-left: var(--space-sm); color: var(--fg-dim); font: 0.72rem var(--mono); }
 	.plugin-install label { display: block; margin-bottom: var(--space-xs); color: var(--fg-soft); font-size: 0.8rem; font-weight: 650; }
 	.plugin-install div { display: flex; gap: var(--space-sm); }
 	.plugin-install input { flex: 1; min-width: 0; padding: var(--space-sm); border-radius: var(--radius-sm); border: 1px solid var(--rail); background: var(--inset); color: var(--fg); font-family: var(--mono); }

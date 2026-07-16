@@ -244,6 +244,22 @@ export interface PluginPermissions {
   env?: string[];
 }
 
+export interface RegistryPlugin {
+  slug: string;
+  label: string;
+  description: string;
+  version: string;
+  min_app_version: string;
+  source: { owner: string; repo: string; ref: string; path: string };
+  manifest_sha256: string;
+}
+
+export interface RegistryPluginStatus extends RegistryPlugin {
+  installed: boolean;
+  update_available: boolean;
+  compatible: boolean;
+}
+
 /** An integration's state, as the settings page sees it. Carries no secrets. */
 export interface SourceStatus {
   slug: string;

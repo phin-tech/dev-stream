@@ -17,6 +17,7 @@ import type {
 	PostQuery,
 	Settings,
 	SettingsInfo,
+	RegistryPluginStatus,
 	SourceStatus,
 	StreamEvent,
 	View,
@@ -183,6 +184,15 @@ export function installPlugin(url: string): Promise<SourceStatus> {
 		headers: { 'content-type': 'application/json' },
 		body: JSON.stringify({ url })
 	});
+}
+
+export async function fetchPluginRegistry(): Promise<RegistryPluginStatus[]> {
+	const { plugins } = await request<{ plugins: RegistryPluginStatus[] }>('/api/plugins/registry');
+	return plugins;
+}
+
+export function installRegistryPlugin(slug: string): Promise<SourceStatus> {
+	return request<SourceStatus>(`/api/plugins/registry/${encodeURIComponent(slug)}/install`, { method: 'POST' });
 }
 
 /**

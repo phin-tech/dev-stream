@@ -19,6 +19,8 @@ export interface GitHubArchiveSource {
 export interface InstallPluginOptions {
 	pluginsRoot: string;
 	source: GitHubArchiveSource;
+	expectedManifestHash?: string;
+	replace?: boolean;
 }
 
 interface GitHubContent {
@@ -126,8 +128,20 @@ export async function installPluginFromGitHub(
 		}
 
 		const staged = await loadPlugin(stagingRoot);
+		if (options.expectedManifestHash && staged.hash !== options.expectedManifestHash) {
+			throw new Error('downloaded plugin manifest does not match the registry checksum');
+		}
 		const target = join(options.pluginsRoot, staged.manifest.slug || basename(selectedRoot));
-		await Deno.rename(stagingRoot, target);
+		if (options.replace) {
+			const backup = `${target}.previous`;
+			try { await Deno.remove(backup, { recursive: true }); } catch (err) { if (!(err instanceof Deno.errors.NotFound)) throw err; }
+			let moved = false;
+			try { await Deno.rename(target, backup); moved = true; } catch (err) { if (!(err instanceof Deno.errors.NotFound)) throw err; }
+			try { await Deno.rename(stagingRoot, target); } catch (err) { if (moved) await Deno.rename(backup, target); throw err; }
+			if (moved) await Deno.remove(backup, { recursive: true });
+		} else {
+			await Deno.rename(stagingRoot, target);
+		}
 		return await loadPlugin(target);
 	} catch (error) {
 		try {
