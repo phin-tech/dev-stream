@@ -43,7 +43,6 @@ Requirements:
 - Node.js
 
 ```sh
-npm install
 deno task install
 ```
 
@@ -51,6 +50,21 @@ This installs:
 
 - `~/.local/bin/dev-stream`
 - `~/Applications/dev-stream.app`
+
+`install` runs `deno task setup` first, so a fresh clone is bootstrapped
+automatically. `setup` populates `node_modules/` (`deno install` — `deno.json`
+uses `nodeModulesDir: manual`, so Deno won't auto-install) and generates
+`.svelte-kit/tsconfig.json` (`npm run prepare` → svelte-kit sync). Both are
+gitignored and both are required for the build to type-check:
+
+- Without `node_modules`, `zod` and `@modelcontextprotocol/sdk` resolve to
+  nothing and the MCP server fails with implicit-`any` errors (TS7006 / TS7031).
+- Without `.svelte-kit/tsconfig.json` (which the root `tsconfig.json` extends),
+  the module options collapse into a conflicting `bundler` + `NodeNext` combo
+  (TS5095 / TS5109).
+
+Run `deno task setup` on its own if you only need the dev/test toolchain
+without building the app.
 
 Open the app, then post an event:
 
