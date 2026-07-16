@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { escapeIntent } from '../interaction-policy';
 	import { resolveSidebarCollapsed, type SidebarOverride } from '../timeline';
 	import type { PostFilter, ViewWithUnread } from '../../shared/types';
 
@@ -53,6 +54,15 @@
 		event.preventDefault();
 		if (!name.trim()) return;
 		onSave(name.trim());
+		name = '';
+		naming = false;
+	}
+
+	function handleNameKeydown(event: KeyboardEvent) {
+		if (event.key !== 'Escape') return;
+		if (escapeIntent({ menuOpen: false, namingView: naming, hasFilter }) !== 'cancel-view-naming') return;
+		event.preventDefault();
+		event.stopPropagation();
 		name = '';
 		naming = false;
 	}
@@ -113,6 +123,7 @@
 				bind:value={name}
 				placeholder="View name"
 				autofocus
+				onkeydown={handleNameKeydown}
 				onblur={() => !name.trim() && (naming = false)}
 			/>
 		</form>

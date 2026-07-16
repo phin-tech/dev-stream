@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { escapeIntent } from '../interaction-policy';
 	import type { Post } from '../../shared/types';
 	import { openExternal } from '../api';
 	import { absoluteTime, KIND_TONE, relativeTime, sourceColor } from '../format';
@@ -22,6 +23,16 @@
 	let { post, onFilter, onMute, onSeenChange, selected = false, fresh = false }: Props = $props();
 
 	let menuOpen = $state(false);
+	let menuButton = $state<HTMLButtonElement | null>(null);
+
+	function handleMenuKeydown(event: KeyboardEvent) {
+		if (event.key !== 'Escape') return;
+		if (escapeIntent({ menuOpen, namingView: false, hasFilter: false }) !== 'close-menu') return;
+		event.preventDefault();
+		event.stopPropagation();
+		menuOpen = false;
+		menuButton?.focus();
+	}
 	let expanded = $state(false);
 
 	// Recomputed only when the body changes -- sanitizing markdown on every
@@ -144,8 +155,9 @@
 
 			<h2>{post.title}</h2>
 
-			<div class="more">
+			<div class="more" onkeydown={handleMenuKeydown}>
 				<button
+					bind:this={menuButton}
 					class="dots"
 					title="Mute…"
 					onclick={(e) => {

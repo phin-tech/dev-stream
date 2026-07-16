@@ -80,6 +80,7 @@ export class Broadcaster {
 
 		return new Response(stream, {
 			headers: {
+				'access-control-allow-origin': '*',
 				'content-type': 'text/event-stream',
 				'cache-control': 'no-cache',
 				connection: 'keep-alive',
