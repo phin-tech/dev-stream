@@ -341,7 +341,7 @@
 		padding: 0.05rem 0.32rem;
 		border-radius: 999px;
 		background: var(--live);
-		color: #1a1206;
+		color: var(--ink);
 		flex-shrink: 0;
 		margin-right: 0.2rem;
 	}
@@ -484,5 +484,14 @@
 		color: var(--fg-soft);
 		font-variant-numeric: tabular-nums;
 		white-space: nowrap;
+	}
+	/* Touch has no hover to reveal the ••• actions; keep them visible and
+	   large enough to hit. */
+	@media (hover: none) and (pointer: coarse) {
+		.view-actions {
+			opacity: 1;
+			min-width: var(--target);
+			min-height: var(--target);
+		}
 	}
 </style>

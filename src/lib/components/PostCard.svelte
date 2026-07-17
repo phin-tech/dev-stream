@@ -218,8 +218,13 @@
 
 			{#if Object.keys(extraMeta).length > 0}
 				<details class="meta">
-					<summary>meta</summary>
-					<pre>{JSON.stringify(extraMeta, null, 2)}</pre>
+					<summary>Details</summary>
+					<dl>
+						{#each Object.entries(extraMeta) as [key, value] (key)}
+							<dt>{key}</dt>
+							<dd>{typeof value === 'object' ? JSON.stringify(value) : String(value)}</dd>
+						{/each}
+					</dl>
 				</details>
 			{/if}
 		</footer>
@@ -277,23 +282,10 @@
 		box-shadow: 0 0 0 3px color-mix(in oklch, var(--live) 14%, transparent);
 	}
 	.post.alert { border-color: color-mix(in oklch, var(--alert) 65%, var(--rail)); }
-	.post.fresh { animation: card-arrival 320ms var(--ease-out); }
+	.post.fresh { animation: card-arrival 200ms var(--ease-out); }
 	@keyframes card-arrival { from { transform: translateY(-0.4rem); filter: brightness(1.25); } }
-	@keyframes node-pulse {
-		0% {
-				box-shadow: none;
-		}
-		70% {
-			box-shadow: 0 0 0 3px var(--ink), 0 0 0 9px rgb(246 169 53 / 0);
-		}
-		100% {
-			box-shadow: 0 0 0 3px var(--ink), 0 0 0 9px rgb(246 169 53 / 0);
-		}
-	}
 	@media (prefers-reduced-motion: reduce) {
-		.post.fresh .when::after {
-			animation: none;
-		}
+		.post.fresh { animation: none; }
 	}
 
 	.content {
@@ -559,14 +551,23 @@
 		cursor: pointer;
 		padding: 0.08rem 0.4rem;
 	}
-	.meta pre {
+	.meta dl {
+		display: grid;
+		grid-template-columns: max-content 1fr;
+		gap: 0.15rem var(--space-md);
 		margin: 0.3rem 0 0;
-		padding: 0.5rem;
+		padding: 0.5rem 0.6rem;
 		background: var(--inset);
 		border: 1px solid var(--rail-soft);
 		border-radius: 7px;
-		overflow-x: auto;
-		font-size: 0.72rem;
+	}
+	.meta dt {
+		color: var(--fg-dim);
+	}
+	.meta dd {
+		margin: 0;
+		color: var(--fg-soft);
+		word-break: break-word;
 	}
 
 	button {
@@ -579,5 +580,21 @@
 		.when { order: 2; }
 		header h2 { flex-basis: 100%; order: 2; }
 		.more { margin-left: auto; }
+	}
+	/* On touch there is no hover, so the ⋯ menu and disclosure can't be
+	   revealed by cursor — and their 28px default is below the 44px touch
+	   target. Bring them into view and up to size. */
+	@media (hover: none) and (pointer: coarse) {
+		.dots,
+		.disclosure {
+			opacity: 1;
+			min-width: var(--target);
+			min-height: var(--target);
+		}
+		.dots { color: var(--fg-soft); }
+		.chip {
+			min-height: var(--target);
+			padding: 0 var(--space-sm);
+		}
 	}
 </style>

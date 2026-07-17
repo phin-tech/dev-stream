@@ -349,7 +349,10 @@
 			{/if}
 
 			{#if feed.error}
-				<p class="notice error">{feed.error}</p>
+				<div class="notice error">
+					<span>Couldn’t load the timeline — {feed.error}</span>
+					<button onclick={() => void feed.start()}>Retry</button>
+				</div>
 			{/if}
 
 			{#if feed.loading}
@@ -393,7 +396,7 @@
 					{#if feed.loadingMore}
 						<span class="notice">Loading more…</span>
 					{:else if !feed.hasMore && feed.posts.length > 0}
-						<span class="notice">End of the timeline.</span>
+						<span class="notice">You’re caught up.</span>
 					{/if}
 				</div>
 			</div>
@@ -494,19 +497,22 @@
 	}
 	@keyframes pill-pulse {
 		0% {
-			box-shadow: 0 0 0 0 rgb(246 169 53 / 0.55);
+			box-shadow: 0 0 0 0 color-mix(in srgb, var(--live) 55%, transparent);
 		}
 		70% {
-			box-shadow: 0 0 0 6px rgb(246 169 53 / 0);
+			box-shadow: 0 0 0 6px transparent;
 		}
 		100% {
-			box-shadow: 0 0 0 0 rgb(246 169 53 / 0);
+			box-shadow: 0 0 0 0 transparent;
 		}
 	}
+	/* The live pill pulses so arrivals register in peripheral vision while the
+	   reader is heads-down in the feed. */
+	.pill {
+		animation: pill-pulse 1.8s var(--ease-out) infinite;
+	}
 	@media (prefers-reduced-motion: reduce) {
-		.pill::before {
-			animation: none;
-		}
+		.pill { animation: none; }
 	}
 
 	.muted-bar {
@@ -562,6 +568,21 @@
 	}
 	.notice.error {
 		color: var(--alert);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: var(--space-md);
+		flex-wrap: wrap;
+	}
+	.notice.error button {
+		border: 1px solid color-mix(in oklch, var(--alert) 50%, transparent);
+		border-radius: var(--radius-sm);
+		background: transparent;
+		color: var(--alert);
+		font-family: var(--mono);
+		font-size: 0.78rem;
+		min-height: var(--target);
+		padding: 0 var(--space-md);
 	}
 
 	code {

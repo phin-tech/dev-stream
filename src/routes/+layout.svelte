@@ -98,6 +98,7 @@
 			--radius-sm: 0.5rem;
 			--radius-md: 0.75rem;
 			--radius-lg: 1rem;
+			--target: 2.75rem;
 			--z-dropdown: 20;
 			--z-sticky: 30;
 			--z-modal: 60;
@@ -147,9 +148,7 @@
 			padding: 0 var(--space-lg);
 			height: 3rem;
 		flex-shrink: 0;
-			background: color-mix(in oklch, var(--surface) 84%, transparent);
-			-webkit-backdrop-filter: blur(16px) saturate(1.4);
-			backdrop-filter: blur(16px) saturate(1.4);
+			background: var(--surface);
 		}
 
 	.brand {
@@ -195,5 +194,13 @@
 			border-bottom-color: var(--live);
 		}
 		@media (max-width: 38rem) { .brand { font-size: 0; } .brand-mark { font-size: 0.72rem; } .connection { display: none; } .nav-links { margin-left: auto; margin-right: 0; } }
-		@media (prefers-reduced-motion: reduce) { :global(*) { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
+		@media (prefers-reduced-motion: reduce) {
+		/* Suppress geometry and decorative motion only — the chevron rotation,
+		   the card-arrival flourish, and the fresh-node pulse. Color, border,
+		   background, and focus-ring transitions keep running so state feedback
+		   still reads for users who rely on it. */
+		:global(.post.fresh) { animation: none; }
+		:global(.post) { transition: border-color 180ms var(--ease-out), background 180ms var(--ease-out); }
+		:global(.sidebar-toggle span) { transition-duration: 0.01ms !important; }
+	}
 	</style>

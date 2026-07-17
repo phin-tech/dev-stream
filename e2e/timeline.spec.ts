@@ -139,7 +139,7 @@ test('main page chrome uses restrained material and interruptible shell motion',
 	const sidebarToggleIcon = page.locator('.sidebar-toggle span');
 	const search = page.getByRole('searchbox', { name: 'Search the timeline…' });
 
-	await expect(titleBar).toHaveCSS('backdrop-filter', 'blur(16px) saturate(1.4)');
+	await expect(titleBar).toHaveCSS('backdrop-filter', 'none');
 	await expect(titleBar).toHaveCSS('position', 'relative');
 	await expect(sidebarToggleIcon).toHaveCSS('transition-property', 'transform');
 	await expect(sidebarToggleIcon).toHaveCSS('transition-duration', '0.2s');
