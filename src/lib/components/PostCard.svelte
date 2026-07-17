@@ -233,7 +233,7 @@
 		display: grid;
 		grid-template-columns: 3.5rem 1fr;
 		gap: var(--space-md);
-		padding: 0.625rem var(--space-md);
+		padding: 0.375rem var(--space-md);
 		margin-block: 0;
 		border: 0;
 		border-bottom: 1px solid var(--rail-soft);
@@ -300,7 +300,7 @@
 		min-width: 0;
 		position: relative;
 	}
-	.post.collapsible .content { padding-right: 3rem; }
+	.post.collapsible .content { padding-right: 2rem; }
 
 	.more {
 		position: relative;
@@ -311,8 +311,8 @@
 		border: none;
 		background: transparent;
 		color: var(--fg-dim);
-		min-width: 2.75rem;
-		min-height: 2.75rem;
+		min-width: 1.75rem;
+		min-height: 1.75rem;
 		line-height: 1;
 		opacity: 0;
 	}
@@ -439,11 +439,11 @@
 	.disclosure {
 		position: absolute;
 		right: 0;
-		top: 1.9rem;
+		top: 1.35rem;
 		display: grid;
 		place-items: center;
-		width: 2.75rem;
-		min-height: 2.75rem;
+		width: 1.75rem;
+		min-height: 1.75rem;
 		padding: 0;
 		border: none;
 		background: transparent;
@@ -486,7 +486,7 @@
 		flex-wrap: wrap;
 		align-items: center;
 		gap: var(--space-xs) var(--space-sm);
-		margin-top: var(--space-sm);
+		margin-top: var(--space-xs);
 	}
 	footer:empty {
 		display: none;
@@ -516,13 +516,11 @@
 		color: var(--live);
 	}
 	.chip.link {
-		padding: var(--space-xs) var(--space-sm);
+		padding: 0.1rem 0.45rem;
 		border-radius: 999px;
-		border: 1px solid color-mix(in oklch, var(--live) 60%, var(--rail));
-		border-color: color-mix(in oklch, var(--live) 60%, var(--rail));
-		background: color-mix(in oklch, var(--live) 12%, var(--surface));
+		border: 1px solid color-mix(in oklch, var(--live) 45%, var(--rail));
 		color: var(--live-soft);
-		font-weight: 700;
+		font-weight: 650;
 	}
 
 	/* PR/issue state. Not a filter chip — it's a fact about the item, not
