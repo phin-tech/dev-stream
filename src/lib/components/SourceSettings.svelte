@@ -7,9 +7,11 @@
 	interface Props {
 		source: SourceStatus;
 		onChange: (source: SourceStatus) => void;
+		/** false when rendered inside a dialog — the card chrome moves to the modal. */
+		framed?: boolean;
 	}
 
-	let { source, onChange }: Props = $props();
+	let { source, onChange, framed = true }: Props = $props();
 
 	/**
 	 * The manifest's permission list, flattened for display. This is the whole
@@ -108,9 +110,9 @@
 	}
 </script>
 
-<div class="source" class:enabled={source.enabled}>
+<div class="source" class:enabled={source.enabled} class:framed>
 	<div class="head">
-		<strong>{source.label}</strong>
+		{#if framed}<strong>{source.label}</strong>{/if}
 		{#if source.origin === 'plugin'}
 			<span class="badge plugin">plugin</span>
 		{/if}
@@ -208,14 +210,14 @@
 </div>
 
 <style>
-	.source {
+	.source.framed {
 		border: 1px solid var(--rail);
 		border-radius: var(--radius-md);
 		padding: var(--space-lg);
 		margin-bottom: var(--space-md);
 		background: var(--surface-raised);
 	}
-	.source.enabled {
+	.source.framed.enabled {
 		border-color: color-mix(in srgb, var(--live) 40%, var(--rail));
 	}
 
