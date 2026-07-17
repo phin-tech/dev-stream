@@ -248,10 +248,11 @@
 	}
 	.post:hover {
 		border-radius: 0.625rem;
-		border-color: var(--rail);
+		border-bottom-color: transparent;
 		background: color-mix(in oklch, var(--surface-raised) 55%, transparent);
 	}
 	.post.selected {
+		border-bottom-color: transparent;
 		box-shadow: inset 0 0 0 1px var(--live);
 		background: color-mix(in oklch, var(--surface-raised) 88%, var(--live));
 	}
